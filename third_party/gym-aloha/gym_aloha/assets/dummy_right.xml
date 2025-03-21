@@ -1,0 +1,85 @@
+<mujocoinclude>
+  <body name="dummy_right" pos="0.35 0.5 0" euler="0 0 3.1416">
+    <geom type="mesh" mesh="base_link" name="dummy_right/base_link" />
+    <body name="dummy_right/link1_1" pos="0 0 0.0925">
+      <inertial pos="0.00966548 -0.0098392 0.0188663" quat="0.200965 0.505486 -0.211324 0.812059"
+        mass="0.143295" diaginertia="0.000113806 0.000103269 3.49253e-05" />
+      <joint name="dummy_right/joint0_1" pos="0 0 0" axis="0 0 1" range="-2.96706 2.96706"
+        frictionloss="50" />
+      <geom pos="0 0 -0.0925" quat="1 0 0 0" type="mesh" mesh="link1_1" name="dummy_right/link1_1" />
+      <body name="dummy_right/link2_link3_1" pos="0.035 -0.015 0.0395">
+        <inertial pos="-0.0696301 0.0162959 0.0213185"
+          quat="-0.0281696 0.804274 0.00566808 0.593564" mass="1.60806"
+          diaginertia="0.00486072 0.00479639 0.000577888" />
+        <joint name="dummy_right/joint1_2" pos="0 0 0" axis="0 1 0" range="0 3.14159"
+          frictionloss="50" />
+        <geom pos="-0.035 0.015 -0.132" quat="1 0 0 0" type="mesh" mesh="link2_link3_1"
+          name="dummy_right/link2_link3_1" />
+        <body name="dummy_right/link4_1" pos="-0.13962 0.0336 0.042686">
+          <inertial pos="-0.0019138 -0.0151018 0.0517423" quat="0.13749 0.736878 0.527351 0.40001"
+            mass="0.693111" diaginertia="0.000465937 0.000374158 0.000261904" />
+          <joint name="dummy_right/joint2_3" pos="0 0 0" axis="0 1 0" range="-3.14159 0"
+            frictionloss="50" />
+          <geom pos="0.10462 -0.0186 -0.174686" quat="1 0 0 0" type="mesh" mesh="link4_1"
+            name="dummy_right/link4_1" />
+          <body name="dummy_right/link5_1" pos="0.025722 -0.017 0.046512">
+            <inertial pos="0.065456 0.00188251 -0.0200087"
+              quat="0.441638 0.576892 0.559228 0.399268" mass="0.409298"
+              diaginertia="0.000507718 0.000503283 7.49992e-05" />
+            <joint name="dummy_right/joint3_4" pos="0 0 0" axis="0.956305 0 -0.292372"
+              range="-3.14159 3.14159" frictionloss="50" />
+            <geom pos="0.078898 -0.0016 -0.221198" quat="1 0 0 0" type="mesh" mesh="link5_1"
+              name="dummy_right/link5_1" />
+            <body name="dummy_right/link6_1" pos="0.099934 -0.0151 -0.030553">
+              <inertial pos="0.0544332 0.0144717 -0.0166427"
+                quat="-0.0865256 0.787984 0.138118 0.593732" mass="0.326583"
+                diaginertia="0.000179226 0.000175198 6.15756e-05" />
+              <joint name="dummy_right/joint4_5" pos="0 0 0" axis="0 1 0" range="-1.74533 2.0944"
+                frictionloss="50" />
+              <geom pos="-0.021036 0.0135 -0.190645" quat="1 0 0 0" type="mesh" mesh="link6_1"
+                name="dummy_right/link6_1" />
+              <body name="dummy_right/gripper_base_1" pos="0.085781 0.0171 -0.026226">
+                <body name="dummy_right/camera_focus" pos="0.15 0 0.01">
+                  <site pos="0 0 0" size="0.01" type="sphere" name="right_cam_focus" rgba="0 0 1 0" />
+                </body>
+                <site pos="0.15 0 0" size="0.003 0.003 0.03" type="box" name="cali_right_site1"
+                  rgba="0 0 1 0" />
+                <site pos="0.15 0 0" size="0.003 0.03 0.003" type="box" name="cali_right_site2"
+                  rgba="0 0 1 0" />
+                <site pos="0.15 0 0" size="0.03 0.003 0.003" type="box" name="cali_right_site3"
+                  rgba="0 0 1 0" />
+                <camera name="right_wrist" pos="-0.1 0 0.16" fovy="20" mode="targetbody"
+                  target="dummy_right/camera_focus" />
+                <inertial pos="0.029945 3.41776e-05 -0.00928677"
+                  quat="0.568426 0.568426 -0.420585 0.420585" mass="0.425373"
+                  diaginertia="0.000423562 0.000323438 0.000162" />
+                <joint name="dummy_right/joint5_6" pos="0 0 0" axis="-0.956305 0 0.292372"
+                  frictionloss="50" />
+                <geom pos="-0.106817 -0.0036 -0.164419" quat="1 0 0 0" type="mesh"
+                  mesh="gripper_base_1" name="dummy_right/gripper_base_1" />
+                <body name="dummy_right/left_finger_link_2" pos="0.059249 -0.030001 -0.018263">
+                  <inertial pos="0.0134217 0.000134118 -0.0042689"
+                    quat="0.293487 0.595078 0.655357 0.360909" mass="0.151886"
+                    diaginertia="6.25724e-05 4.19121e-05 2.65155e-05" />
+                  <joint name="dummy_right/finger_left_pos" pos="0 0 0" axis="0 1 0" type="slide"
+                    range="0 0.024" frictionloss="5" />
+                  <geom pos="-0.166066 0.026401 -0.146156" quat="1 0 0 0" type="mesh"
+                    mesh="left_finger_link_2" name="dummy_right/left_finger_link_2" />
+                </body>
+                <body name="dummy_right/right_finger_link_1" pos="0.059249 0.029999 -0.018263">
+                  <inertial pos="0.012964 -0.000133626 -0.00576603"
+                    quat="0.447464 0.599478 0.541249 0.383995" mass="0.151886"
+                    diaginertia="6.15045e-05 4.12968e-05 2.71987e-05" />
+                  <joint name="dummy_right/finger_right_pos" pos="0 0 0" axis="0 1 0" type="slide"
+                    range="-0.024 0" frictionloss="5" />
+                  <geom pos="-0.166066 -0.033599 -0.146156" quat="1 0 0 0" type="mesh"
+                    mesh="right_finger_link_1" name="dummy_right/right_finger_link_1" />
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </body>
+</mujocoinclude>

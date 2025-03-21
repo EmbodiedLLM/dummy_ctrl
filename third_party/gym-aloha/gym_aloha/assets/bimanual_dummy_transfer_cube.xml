@@ -1,0 +1,40 @@
+<mujoco>
+    <include file="dummy_scene.xml"/>
+    <include file="dummy_dependencies.xml"/>
+    <worldbody>
+        <include file="dummy_left.xml" />
+        <include file="dummy_right.xml" />
+
+        <body name="box" pos="0.2 0.5 0.05">
+            <joint name="red_box_joint" type="free" frictionloss="0.01" />
+            <inertial pos="0 0 0" mass="0.05" diaginertia="0.002 0.002 0.002" />
+            <geom condim="4" solimp="2 1 0.01" solref="0.01 1" friction="1 0.005 0.0001" pos="0 0 0" size="0.02 0.02 0.02" type="box" name="red_box" rgba="1 0 0 1" />
+        </body>
+
+    </worldbody>
+
+    <actuator>
+        <position ctrllimited="true" ctrlrange="-2.96706 2.96706" joint="dummy_left/joint0_1" kp="500" user="1" forcelimited="true" forcerange="-500 500"/>
+        <position ctrllimited="true" ctrlrange="0 3.14159" joint="dummy_left/joint1_2" kp="150" user="1" forcelimited="true" forcerange="-150 150"/>
+        <position ctrllimited="true" ctrlrange="-3.14159 0" joint="dummy_left/joint2_3" kp="150" user="1" forcelimited="true" forcerange="-150 150"/>
+        <position ctrllimited="true" ctrlrange="-3.14159 3.14159" joint="dummy_left/joint3_4" kp="150" user="1" forcelimited="true" forcerange="-150 150"/>
+        <position ctrllimited="true" ctrlrange="-1.74533 2.0944" joint="dummy_left/joint4_5" kp="150" user="1" forcelimited="true" forcerange="-150 150"/>
+        <position ctrllimited="true" ctrlrange="-3.14159 3.14159" joint="dummy_left/joint5_6" kp="20" user="1" forcelimited="true" forcerange="-150 150"/>
+        <position ctrllimited="true" ctrlrange="0 0.024" joint="dummy_left/finger_left_pos" kp="800" user="1" forcelimited="true" forcerange="-200 200"/>
+        <position ctrllimited="true" ctrlrange="-0.02 0" joint="dummy_left/finger_right_pos" kp="800" user="1" forcelimited="true" forcerange="-200 200"/>
+
+        <position ctrllimited="true" ctrlrange="-2.96706 2.96706" joint="dummy_right/joint0_1" kp="500" user="1" forcelimited="true" forcerange="-500 500"/>
+        <position ctrllimited="true" ctrlrange="0 3.14159" joint="dummy_right/joint1_2" kp="150" user="1" forcelimited="true" forcerange="-150 150"/>
+        <position ctrllimited="true" ctrlrange="-3.14159 0" joint="dummy_right/joint2_3" kp="150" user="1" forcelimited="true" forcerange="-150 150"/>
+        <position ctrllimited="true" ctrlrange="-3.14159 3.14159" joint="dummy_right/joint3_4" kp="150" user="1" forcelimited="true" forcerange="-150 150"/>
+        <position ctrllimited="true" ctrlrange="-1.74533 2.0944" joint="dummy_right/joint4_5" kp="150" user="1" forcelimited="true" forcerange="-150 150"/>
+        <position ctrllimited="true" ctrlrange="-3.14159 3.14159" joint="dummy_right/joint5_6" kp="20" user="1" forcelimited="true" forcerange="-150 150"/>
+        <position ctrllimited="true" ctrlrange="0 0.024" joint="dummy_right/finger_left_pos" kp="800" user="1" forcelimited="true" forcerange="-200 200"/>
+        <position ctrllimited="true" ctrlrange="-0.02 0" joint="dummy_right/finger_right_pos" kp="800" user="1" forcelimited="true" forcerange="-200 200"/>
+    </actuator>
+
+    <keyframe>
+        <key qpos='0 1.274 -1.571 0 0 0 0 0     0 1.274 -1.571 0 0 0 0 0    0.2 0.5 0.05 1 0 0 0'/>
+    </keyframe>
+
+</mujoco>
