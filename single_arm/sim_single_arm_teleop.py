@@ -65,4 +65,3 @@ while True:
     elapsed = time.monotonic() - start_time
     sleep_time = max(0, 1/freq - elapsed)
     time.sleep(sleep_time)
-# %%
