@@ -1,0 +1,24 @@
+[project]
+name = "telemoma"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "igibson>=2.2.2",
+    "ipykernel>=6.29.5",
+    "mediapipe>=0.10.21",
+    "oculus-reader",
+    "pynput>=1.7.7",
+    "telemoma",
+    "torch>=2.6.0",
+    "torchaudio>=2.6.0",
+    "torchvision>=0.21.0",
+]
+
+[tool.uv.sources]
+telemoma = { workspace = true }
+oculus-reader = { path = "../oculus_reader" }
