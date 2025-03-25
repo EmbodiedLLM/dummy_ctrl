@@ -10,3 +10,8 @@ misc/
 
 # Virtual environments
 .venv
+
+*.cache
+.cache/
+*.github
+.github/
