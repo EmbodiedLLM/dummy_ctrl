@@ -53,7 +53,7 @@ import torch
 from huggingface_hub import HfApi
 from safetensors.torch import save_file
 
-from lerobot.common.datasets.compute_stats import compute_stats
+from lerobot.common.datasets.compute_stats import compute_episode_stats
 from lerobot.common.datasets.lerobot_dataset import CODEBASE_VERSION, LeRobotDataset
 from lerobot.common.datasets.push_dataset_to_hub.utils import check_repo_id
 from lerobot.common.datasets.utils import create_branch, create_lerobot_dataset_card, flatten_dict
@@ -88,6 +88,7 @@ def save_meta_data(
     meta_data_dir.mkdir(parents=True, exist_ok=True)
 
     # save info
+    
     info_path = meta_data_dir / "info.json"
     with open(str(info_path), "w") as f:
         json.dump(info, f, indent=4)
@@ -220,7 +221,7 @@ def push_dataset_to_hub(
         info=info,
         videos_dir=videos_dir,
     )
-    stats = compute_stats(lerobot_dataset, batch_size, num_workers)
+    stats = compute_episode_stats(lerobot_dataset, batch_size, num_workers)
 
     if local_dir:
         hf_dataset = hf_dataset.with_format(None)  # to remove transforms that cant be saved

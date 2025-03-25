@@ -13,12 +13,16 @@ cd dummy_ctrl
 
 ### 2. Environment Setup
 
+For Mac:
+brew install libusb
+
 This project uses `uv` for Python environment management. Set up the environment with:
 
 ```bash
 uv venv
 source .venv/bin/activate
 uv sync
+uv pip install pyusb
 ```
 
 This will create a virtual environment and install all required dependencies.
