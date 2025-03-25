@@ -98,10 +98,35 @@ class LeRobotDataCollector:
         for key in self.current_episode_data:
             self.current_episode_data[key] = []
             
-        # Create temp image directory
-        if self.use_video and self.tmp_img_dir.exists():
-            shutil.rmtree(self.tmp_img_dir)
-        self.tmp_img_dir.mkdir(exist_ok=True)
+        # Create clean temp image directory
+        if self.use_video:
+            if self.tmp_img_dir.exists():
+                shutil.rmtree(self.tmp_img_dir)
+            self.tmp_img_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Reset and clear camera buffer completely
+        if self.camera_url:
+            # Release old camera instance
+            if self.cap:
+                self.cap.release()
+                self.cap = None
+                time.sleep(0.1)  # Give camera time to properly close
+            
+            # Setup new camera
+            self.setup_camera()
+            if self.cap and self.cap.isOpened():
+                # Set camera properties
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer size
+                self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+                
+                # Clear buffer thoroughly
+                t_start = time.time()
+                while time.time() - t_start < 1.0:  # Clear buffer for 1 second
+                    self.cap.grab()  # Just grab frames without decoding
+                
+                # Read a few more frames to ensure clean start
+                for _ in range(10):
+                    self.cap.read()
         
         logger.info(f"Started episode {self.episode_count}")
         
@@ -109,9 +134,9 @@ class LeRobotDataCollector:
         """Collect one timestep of data"""
         if self.start_time is None:
             self.start_episode()
-            
-        # Use fixed timestamp increment of 0.1 seconds
-        timestamp = np.float32(round(self.frame_count * 0.1, 1))  # Fixed 0.1s interval
+
+        # Use fixed timestamp increment of rate seconds
+        timestamp = np.float32(round(self.frame_count * rate, 1)) 
         # timestamp = rate
         
         # Capture frame if using camera
@@ -336,7 +361,6 @@ class LeRobotDataCollector:
                         "action": action_stats
                     }
                 }
-                f.write(json.dumps(stats) + "\n")
                 # Add video stats if using video
                 if self.use_video:
                     video_stats = self._compute_video_stats(i)
