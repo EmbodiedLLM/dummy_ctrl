@@ -136,8 +136,7 @@ class LeRobotDataCollector:
             self.start_episode()
 
         # Use fixed timestamp increment of rate seconds
-        timestamp = np.float32(round(self.frame_count * rate, 1)) 
-        # timestamp = rate
+        timestamp = np.float64(self.frame_count * rate)
         
         # Capture frame if using camera
         if self.cap and self.cap.isOpened():
@@ -211,40 +210,7 @@ class LeRobotDataCollector:
         self.episode_lengths.append(self.frame_count)        
         logger.info(f"Episode {next_index} saved with {self.frame_count} frames")
         self.frame_count = 0
-    # def finalize_dataset(self):
-    #     """Finalize dataset and save metadata"""
-    #     # Create info.json
-    #     info = {
-    #         "fps": self.fps,
-    #         "robot_type": self.robot_type,
-    #         "total_episodes": self.episode_count,
-    #         "total_frames": self.total_frames,
-    #         "total_chunks": 1,
-    #         "chunks_size": self.episode_count
-    #     }
-        
-    #     if self.use_video:
-    #         info["video"] = {
-    #             "codec": "libx264",
-    #             "crf": 23,
-    #             "preset": "medium"
-    #         }
-            
-    #     info_path = self.meta_dir / "info.json"
-    #     with open(info_path, 'w') as f:
-    #         json.dump(info, f, indent=4)
-            
-    #     # Save episode index
-    #     episode_tensors = {
-    #         "from": torch.tensor(self.episode_data_index["from"], dtype=torch.int64),
-    #         "to": torch.tensor(self.episode_data_index["to"], dtype=torch.int64)
-    #     }
-        
-    #     index_path = self.meta_dir / "episode_data_index.safetensors"
-    #     save_file(episode_tensors, index_path)
-        
-    #     logger.info(f"Dataset finalized with {self.episode_count} episodes and {self.total_frames} frames")
-        
+
     def finalize_dataset(self):
         """Finalize dataset and save metadata files according to ALOHA format"""
         info_path = self.meta_dir / "info.json"
@@ -311,7 +277,7 @@ class LeRobotDataCollector:
                         "names": None
                     },
                     "timestamp": {
-                        "dtype": "float32",
+                        "dtype": "float64",
                         "shape": [1],
                         "names": None
                     },

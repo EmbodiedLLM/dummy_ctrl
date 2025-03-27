@@ -6,8 +6,19 @@ from pynput import keyboard
 import numpy as np
 from __future__ import print_function
 from single_arm.real_collector import LeRobotDataCollector
+from single_arm.arm_angle import ArmAngle
+from single_arm.bi_gripper_open import gripper_open
 # logger verbose=True
 logger = fibre.utils.Logger(verbose=True)
+# %%
+collector = LeRobotDataCollector(
+    # output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/test",
+    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_cube_20demos",
+    fps=50,
+    camera_url="http://192.168.65.124:8080/?action=stream",
+    robot_type="thu_arm",
+    use_video=True,
+)
 # %%
 teach_arm = fibre.find_any(serial_number="208C31875253", logger=logger)
 #%%
@@ -33,16 +44,8 @@ follow_arm.robot.hand.get_mode()
 logger.info(f"Teach Gripper mode: {teach_arm.robot.hand.get_mode()}, Follow Gripper mode: {follow_arm.robot.hand.get_mode()}")
 logger.info(f"Teach Gripper angle: {teach_arm.robot.hand.angle}, Follow Gripper angle: {follow_arm.robot.hand.angle}")
 # %%
-collector = LeRobotDataCollector(
-    # output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/test",
-    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_cube_20demos",
-    fps=50,
-    camera_url="http://192.168.65.110:8080/?action=stream",
-    robot_type="thu_arm",
-    use_video=True,
-)
-# %%
 teach_arm.robot.set_enable(False)
+arm_controller = ArmAngle(teach_arm, follow_arm, joint_offset)
 stop = False
 def on_press(key):
     global stop
@@ -64,29 +67,21 @@ rate = 0.02  # 50Hz
 collector.start_episode()
 while not stop:
     start_time = time.time()
-    joint1_angle = teach_arm.robot.joint_1.angle
-    joint2_angle = teach_arm.robot.joint_2.angle
-    joint3_angle = teach_arm.robot.joint_3.angle
-    joint4_angle = teach_arm.robot.joint_4.angle
-    joint5_angle = teach_arm.robot.joint_5.angle
-    joint6_angle = teach_arm.robot.joint_6.angle
-    print(f"Current leader Joints (action): {joint1_angle}, {joint2_angle}, {joint3_angle}, {joint4_angle}, {joint5_angle}, {joint6_angle}")
-    all_joint_angles = np.array([joint1_angle, joint2_angle, joint3_angle, joint4_angle, joint5_angle, joint6_angle]) + joint_offset
-    all_joint_angles = np.round(all_joint_angles, 5)
-    follow_arm.robot.move_j(all_joint_angles[0], all_joint_angles[1], all_joint_angles[2], all_joint_angles[3], all_joint_angles[4], all_joint_angles[5])
+    teach_joints = arm_controller.get_teach_joints()
+    follow_arm.robot.move_j(*teach_joints)
     follow_arm.robot.hand.set_angle(teach_arm.robot.hand.angle - teach_hand_init_angle + follow_hand_init_angle)
-    print(f"Current follower Joints (state): {all_joint_angles}")
-    teach_joints = np.array([teach_arm.robot.joint_1.angle, 
-                           teach_arm.robot.joint_2.angle,
-                           teach_arm.robot.joint_3.angle, 
-                           teach_arm.robot.joint_4.angle,
-                           teach_arm.robot.joint_5.angle, 
-                           teach_arm.robot.joint_6.angle])
+    follow_joints= arm_controller.get_follow_joints()
+    # print(f"Current follower Joints (state): {follow_joints}")
+    # print(teach_arm.robot.hand.angle)
+    # print(follow_arm.robot.hand.angle)
+    teach_hand, follow_hand = gripper_open(teach_arm.robot.hand.angle, follow_arm.robot.hand.angle)
+    teach_hand = follow_hand
+    print(teach_hand, follow_hand)
     collector.collect_step(
     teach_joints=teach_joints,
-    follow_joints=all_joint_angles,
-    teach_gripper=teach_arm.robot.hand.angle,
-    follow_gripper=follow_arm.robot.hand.angle,
+    follow_joints=follow_joints,
+    teach_gripper=teach_hand,
+    follow_gripper=follow_hand,
     rate=rate
     )
     # Sleep precisely to maintain 10Hz
@@ -98,7 +93,7 @@ while not stop:
     loop_time = time.time() - start_time
     actual_freq = 1.0 / loop_time if loop_time > 0 else 0
     if abs(loop_time - 0.1) > 0.01:  # Allow 10ms deviation
-        print(f"Timing deviation: {loop_time:.3f}s (target: 0.1s)")
+        print(f"Timing deviation: {loop_time:.3f}s (target: 0.02s)")
 # %%
 teach_arm.robot.set_enable(True)
 follow_arm.robot.set_enable(True)
@@ -106,3 +101,5 @@ teach_arm.robot.resting()
 follow_arm.robot.resting()
 # %%
 collector.save_episode()# %%
+
+# %%
