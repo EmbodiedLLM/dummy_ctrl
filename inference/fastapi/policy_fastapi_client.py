@@ -1,6 +1,24 @@
 #%%
+import os
 import sys
-sys.path.append("..")
+from pathlib import Path
+
+def find_project_root(current_dir, marker_files=(".git", "pyproject.toml", "setup.py")):
+    current_dir = Path(current_dir).absolute()
+    
+    while current_dir != current_dir.parent:
+        for marker in marker_files:
+            if (current_dir / marker).exists():
+                return current_dir
+        current_dir = current_dir.parent
+    
+    return Path(os.getcwd())
+
+current_dir = Path(__file__).parent.absolute()
+
+project_root = find_project_root(current_dir)
+sys.path.append(str(project_root))
+
 import fibre
 from pynput import keyboard
 import numpy as np
@@ -98,7 +116,7 @@ follow_arm.robot.resting()
 joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
 follow_arm.robot.set_enable(True)
 inference_time_s = 600
-fps = 2
+fps = 1
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
 # Define the server endpoint

@@ -21,7 +21,7 @@ app.add_middleware(
 
 # Load the ACT policy model
 # You can replace with your specific model path
-PRETRAINED_POLICY_PATH = "/Users/jack/Desktop/dummy_ctrl/100000/pretrained_model"
+PRETRAINED_POLICY_PATH = "/Users/yinzi/Downloads/Dummy_V2_workspace/dummy_ai/dummy_ctrl/checkpoints/train/cube_act_0326/100000/pretrained_model"
 
 # Determine the device based on platform and availability
 if torch.cuda.is_available():
@@ -39,9 +39,8 @@ try:
     policy.to(device)
     print(f"Successfully loaded ACT policy from {PRETRAINED_POLICY_PATH}")
 except Exception as e:
-    print(f"Warning: Could not load ACT policy model: {e}")
-    print("Will use placeholder prediction (ones tensor)")
     policy = None
+    raise e
 
 class InferenceRequest(BaseModel):
     image: List[List[List[float]]]  # For 3D tensor: [3, h, w]

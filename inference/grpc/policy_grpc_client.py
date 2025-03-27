@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 
 class VideoStream:
-    def __init__(self, url, queue_size=128):
+    def __init__(self, url, queue_size=2):
         self.url = url
         self.queue = Queue(maxsize=queue_size)
         self.stopped = False
@@ -228,6 +228,7 @@ def main():
     parser.add_argument("--camera_url", default="http://192.168.65.124:8080/?action=stream", help="Camera URL")
     parser.add_argument("--inference_time_s", type=int, default=60, help="Inference time in seconds")
     parser.add_argument("--control_rate", type=int, default=50, help="Control rate in Hz")
+    parser.add_argument("--queue_size", type=int, default=2, help="Queue size")
     args = parser.parse_args()
 
     logger_fibre = fibre.utils.Logger(verbose=True)
@@ -237,7 +238,7 @@ def main():
     follower_arm.robot.set_enable(True)
     arm_controller = ArmAngle(None, follower_arm, joint_offset)
     print("初始化视频流...")
-    stream = VideoStream(args.camera_url).start()
+    stream = VideoStream(url=args.camera_url, queue_size=args.queue_size).start()
     time.sleep(2.0)  # 等待视频流稳定
 
     # Create client
