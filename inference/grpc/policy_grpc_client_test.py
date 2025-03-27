@@ -210,7 +210,7 @@ def main():
         # Process frames in range
         for frame_idx in range(args.frame_start, end_frame + 1):
             logger.info(f"Processing frame {frame_idx}/{end_frame}")
-            
+
             # Get image from video
             image, _ = get_observation_from_video(args.video, frame_idx)
             

@@ -6,8 +6,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.12",
-    "grpcio>=1.71.0",
-    "grpcio-tools>=1.62.3",
+    "grpcio==1.71.0",
+    "grpcio-tools==1.62.3",
     "gym-aloha-dummy",
     "ipykernel>=6.29.5",
     "lerobot",
@@ -15,6 +15,7 @@ dependencies = [
     "mediapy>=1.2.2",
     "numpy>=2.2.4",
     "opencv-python>=4.11.0.86",
+    "protobuf==4.25.3",
     "pynput>=1.8.1",
     "pyusb>=1.3.1",
     "telemoma",

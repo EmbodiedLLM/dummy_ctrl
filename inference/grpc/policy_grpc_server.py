@@ -24,7 +24,13 @@ logger = logging.getLogger(__name__)
 
 # Load the ACT policy model
 # Update this path to your model location
-PRETRAINED_POLICY_PATH = "/Users/yinzi/Downloads/Dummy_V2_workspace/dummy_ai/dummy_ctrl/checkpoints/train/cube_act_0326/100000/pretrained_model"
+import argparse
+
+# Set up argument parser
+parser = argparse.ArgumentParser(description="Policy gRPC Server")
+parser.add_argument("--model_path", type=str, required=True,help="Path to the pretrained policy model")
+args = parser.parse_args()
+PRETRAINED_POLICY_PATH = args.model_path
 
 # Determine the device based on platform and availability
 if torch.cuda.is_available():
@@ -52,9 +58,10 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
             self.policy.reset()  # Reset policy state
             logger.info(f"Successfully loaded ACT policy")
         except Exception as e:
-            logger.error(f"Could not load ACT policy model: {e}")
-            logger.warning("Will use placeholder prediction (ones tensor)")
             self.policy = None
+            # logger.error(f"Could not load ACT policy model: {e}")
+            # logger.warning("Will use placeholder prediction (ones tensor)")
+            raise e
     
     def reshape_image(self, flat_image, channels, height, width):
         """Reshape flat image data to tensor format [C, H, W]"""
