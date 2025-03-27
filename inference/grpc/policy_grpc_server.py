@@ -76,13 +76,9 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError(f"Failed to decode image with format {image_format}")
-        
-        # Convert BGR to RGB
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
         # Normalize to [0, 1]
         img = img.astype(np.float32) / 255.0
-        
+        assert img.shape == (height, width, 3), f"Image shape is {img.shape}, expected (height, width, 3)"
         # Convert to CHW format (channels, height, width)
         img = img.transpose(2, 0, 1)
         
