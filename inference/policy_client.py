@@ -1,29 +1,75 @@
+#%%
+import sys
+sys.path.append("..")
+import fibre
+from pynput import keyboard
+import numpy as np
+# from __future__ import print_function
+from single_arm.real_collector import LeRobotDataCollector
+from single_arm.arm_angle import ArmAngle
+from single_arm.bi_gripper_open import gripper_open
+# logger verbose=True
+logger = fibre.utils.Logger(verbose=True)
 import time
 import torch
 import pandas as pd
 import os
-from PIL import Image
 import numpy as np
 import requests
-import mediapy as media
+import cv2
+from queue import Queue
+from threading import Thread
 
 
-def get_observation_from_video_and_state(video_path: str, parquet_path: str, timestamp: float = 0.0) -> dict:
-    """Get both video frame and state data for observation"""
-    # Get only the first frame from video
-    with media.VideoReader(video_path) as reader:
-        # Just read the first frame (frame_idx = 0)
-        frame = torch.from_numpy(next(reader)).float()
+class VideoStream:
+    def __init__(self, url, queue_size=128):
+        self.url = url
+        self.queue = Queue(maxsize=queue_size)
+        self.stopped = False
+        
+    def start(self):
+        Thread(target=self.update, daemon=True).start()
+        return self
+        
+    def update(self):
+        cap = cv2.VideoCapture(self.url)
+        while not self.stopped:
+            if not cap.isOpened():
+                print("重新连接摄像头...")
+                cap = cv2.VideoCapture(self.url)
+                time.sleep(1)
+                continue
+                
+            ret, frame = cap.read()
+            if ret:
+                if not self.queue.full():
+                    self.queue.put(frame)
+            else:
+                time.sleep(0.01)  # 避免CPU过度使用
+                
+        cap.release()
+        
+    def read(self):
+        return self.queue.get() if not self.queue.empty() else None
+        
+    def stop(self):
+        self.stopped = True
+
+def get_observation_from_stream(stream, state_data):
+    """从视频流和状态数据获取观察数据"""
+    frame = stream.read()
+    if frame is None:
+        raise ValueError("无法读取视频帧")
     
-    # Read state from parquet
-    df = pd.read_parquet(parquet_path)
-    closest_idx = (df['timestamp'] - timestamp).abs().argmin()
-    state = df.iloc[closest_idx]['observation.state']
-    # Fix: Make numpy array writable before converting to tensor
-    state = state.copy()  # Create writable copy
-    state_tensor = torch.from_numpy(state).float()
+    # 转换为RGB并归一化
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame = torch.from_numpy(frame).float() / 255.0  # 归一化到 0-1
+    frame = frame.permute(2, 0, 1)  # HWC to CHW format
+    print("frame: ", frame.shape)
+    # 获取状态数据
+    state_tensor = torch.tensor(state_data).float()
     
-    # Create observation dict
+    # 创建 observation 字典
     observation = {
         "observation.images.cam_wrist": frame,
         "observation.state": state_tensor
@@ -46,39 +92,45 @@ def busy_wait(duration_s: float) -> None:
     
     while time.monotonic() < end_time:
         pass
-
-
-inference_time_s = 60
-fps = 50
+#%%
+follow_arm = fibre.find_any(serial_number="396636713233", logger=logger)
+follow_arm.robot.resting()
+joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
+follow_arm.robot.set_enable(True)
+inference_time_s = 600
+fps = 2
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
 # Define the server endpoint
-SERVER_URL = "http://localhost:8000/predict"
-
-video_path = "/data1/zjyang/program/tengbo/lerobot/datasets/pick_cube_20demos/videos/chunk-000/observation.images.cam_wrist/episode_000021.mp4"
-parquet_path = "/data1/zjyang/program/tengbo/lerobot/datasets/pick_cube_20demos/data/chunk-000/episode_000021.parquet"
+SERVER_URL = "http://localhost:8001/predict"
+CAMERA_URL = "http://192.168.65.124:8080/?action=stream"
+#%%
 current_frame = 0
+arm_controller = ArmAngle(None, follow_arm, joint_offset)
 
-log_file = open("eval_results.txt", "w")
-
+print("初始化视频流...")
+stream = VideoStream(CAMERA_URL).start()
+time.sleep(2.0)  # 等待视频流稳定
 for _ in range(inference_time_s * fps):
     start_time = time.perf_counter()
 
     # Read the follower state and access the frames from the cameras
     # observation = robot.capture_observation()
-    timestamp = current_frame / fps
-    next_timestamp = (current_frame + 1 ) / fps
-    observation = get_observation_from_video_and_state(video_path, parquet_path, timestamp)
-    next_observation = get_observation_from_video_and_state(video_path, parquet_path, next_timestamp)
-    gt_action = next_observation["observation.state"]
-    print("gt_action: ", gt_action)
+    follow_joints = arm_controller.get_follow_joints()
+    print("follow_joints: ", follow_joints)
+    current_state = follow_joints.tolist() + [0.0]
+    print("current_state: ", current_state)
+    # print("gt_action: ", gt_action)
     
     # Prepare data for server request
-    image = observation["observation.images.cam_wrist"].numpy().tolist()
-    state = observation["observation.state"].numpy().tolist()
     
     # Make request to server
     try:
+        observation = get_observation_from_stream(stream, current_state)
+        
+        # 准备服务器请求数据
+        image = observation["observation.images.cam_wrist"].numpy().tolist()
+        state = observation["observation.state"].numpy().tolist()
         response = requests.post(
             SERVER_URL,
             json={"image": image, "state": state},
@@ -86,19 +138,27 @@ for _ in range(inference_time_s * fps):
         )
         response.raise_for_status()
         prediction_data = response.json()
+        print("服务器返回的预测数据:", prediction_data)
         action = torch.tensor(prediction_data["prediction"])
+        follow_arm.robot.move_j(
+                action[0],  # joint_1
+                action[1],  # joint_2 
+                action[2],  # joint_3
+                action[3],  # joint_4
+                action[4],  # joint_5
+                action[5]   # joint_6
+            )
+        if action[6] >= 0.9:
+            follow_arm.robot.hand.set_angle(-129.03999)  
+        else:
+            follow_arm.robot.hand.set_angle(-165.0) 
     except Exception as e:
         print(f"Error getting prediction from server: {e}")
         # Fallback to dummy prediction if server fails
-        action = torch.ones_like(gt_action)
+        # action = torch.ones_like(gt_action)
     
-    print("predicted action: ", action)
-    print("gt - predicted = ", gt_action - action)
-    log_file.write(f"predicted action: {action}\n")
-    log_file.write(f"gt action: {gt_action}\n")
-    log_file.write(f"gt - predicted = {gt_action - action}\n")
-    log_file.write("\n")  # Add blank line between iterations
-    log_file.flush()  # Ensure output is written immediately
+    # print("predicted action: ", action)
+    # print("gt - predicted = ", gt_action - action)
 
 
     dt_s = time.perf_counter() - start_time
@@ -106,4 +166,4 @@ for _ in range(inference_time_s * fps):
 
     current_frame += 1
 
-log_file.close()
+# %%

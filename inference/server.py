@@ -5,9 +5,9 @@ import torch
 import numpy as np
 import uvicorn
 from typing import List, Dict, Any
-
+import os
 from lerobot.common.policies.act.modeling_act import ACTPolicy
-
+import time
 app = FastAPI(title="PyTorch Inference Server")
 
 # Add CORS middleware to allow cross-origin requests
@@ -21,21 +21,22 @@ app.add_middleware(
 
 # Load the ACT policy model
 # You can replace with your specific model path
-PRETRAINED_POLICY_PATH = "checkpoints/train/cube_act_0326/100000/pretrained_model"
+PRETRAINED_POLICY_PATH = "/Users/jack/Desktop/dummy_ctrl/100000/pretrained_model"
 
 # Determine the device based on platform and availability
-if torch.backends.mps.is_available():
-    device = "mps"  # Use MPS for Mac with Apple Silicon
-elif torch.cuda.is_available():
+if torch.cuda.is_available():
     device = "cuda"  # Use CUDA for systems with NVIDIA GPUs
 else:
     device = "cpu"  # Fallback to CPU
 
+# gpu_id = os.environ.get('GPU_ID', '7')  # Default to GPU 0 if not specified
+# torch.cuda.set_device(int(gpu_id))
+# device = torch.device(f"cuda:{gpu_id}" if torch.cuda.is_available() else "cpu")
+# print(f"Using device: {device}")
+
 try:
     policy = ACTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
     policy.to(device)
-    policy.eval()
-    policy.reset()
     print(f"Successfully loaded ACT policy from {PRETRAINED_POLICY_PATH}")
 except Exception as e:
     print(f"Warning: Could not load ACT policy model: {e}")
@@ -63,38 +64,46 @@ async def predict(request: InferenceRequest):
         # Convert the input data to PyTorch tensors
         image_tensor = torch.tensor(request.image, dtype=torch.float)
         state_tensor = torch.tensor([request.state], dtype=torch.float)  # Add batch dimension
-        
+        print(image_tensor.shape)
+        print(state_tensor.shape)
         # Validate input shapes
         if image_tensor.shape[0] != 3:
             raise HTTPException(status_code=400, detail="Image must have 3 channels (RGB)")
         
         if state_tensor.shape != (1, 7):
             raise HTTPException(status_code=400, detail=f"State must have shape (1, 7), got {state_tensor.shape}")
-        
+        # print(policy)
         # Use the policy model for prediction if available
         if policy is not None:
             # Prepare tensors for the model
+            # print("policy")
             image_tensor = image_tensor.to(device)
             state_tensor = state_tensor.to(device)
             
             # Create the policy input dictionary following the example in 2_evaluate_pretrained_policy.py
             observation = {
                 "observation.state": state_tensor,
-                "observation.image": image_tensor.unsqueeze(0),  # Add batch dimension if needed
+                "observation.images.cam_wrist": image_tensor.unsqueeze(0),  # Add batch dimension if needed
             }
-            
+            # print("observation")
             # Predict the next action with respect to the current observation
-            with torch.inference_mode():
-                action = policy.select_action(observation)
-                
+            # print("observation")
+            # 添加时间计算
+            start_time = time.perf_counter()
+            action = policy.select_action(observation)
+            end_time = time.perf_counter()
+            inference_time = (end_time - start_time) * 1000  # 转换为毫秒
+            print(f"推理时间: {inference_time:.2f}ms")
+            # action = policy.select_action(observation)
             # Convert action to appropriate format
             prediction = action.squeeze(0).to("cpu")
+            print("prediction: ", prediction)
         else:
             # Fallback to placeholder prediction
             prediction = torch.ones(1, 7)
         
         # Convert the prediction to a list for JSON serialization
-        return InferenceResponse(prediction=prediction[0].tolist())
+        return InferenceResponse(prediction=prediction.tolist())
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -123,4 +132,4 @@ async def model_info():
         }
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
