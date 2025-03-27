@@ -6,9 +6,13 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.12",
+    "grpcio>=1.71.0",
+    "grpcio-tools>=1.62.3",
     "gym-aloha-dummy",
     "ipykernel>=6.29.5",
+    "lerobot",
     "mediapipe>=0.10.14",
+    "mediapy>=1.2.2",
     "numpy>=2.2.4",
     "opencv-python>=4.11.0.86",
     "pynput>=1.8.1",
@@ -20,3 +24,4 @@ dependencies = [
 [tool.uv.sources]
 telemoma = { path = "third_party/telemoma_aloha", editable = true }
 gym-aloha-dummy = { path = "third_party/gym-aloha", editable = true }
+lerobot = { path = "third_party/lerobot", editable = true }
