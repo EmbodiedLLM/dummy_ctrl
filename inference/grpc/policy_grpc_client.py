@@ -290,18 +290,18 @@ def main():
             prediction, inference_time_ms = client.predict(image, state)
             logger.info(f"Prediction: {prediction}")
             logger.info(f"Server inference time: {inference_time_ms:.2f}ms")
-            # follower_arm.robot.move_j(
-            #     prediction[0],  # joint_1
-            #     prediction[1],  # joint_2 
-            #     prediction[2],  # joint_3
-            #     prediction[3],  # joint_4
-            #     prediction[4],  # joint_5
-            #     prediction[5]   # joint_6
-            # )
-            # if prediction[6] >= 0.9:
-            #     follower_arm.robot.hand.set_angle(-129.03999)  
-            # else:
-            #     follower_arm.robot.hand.set_angle(-165.0) 
+            follower_arm.robot.move_j(
+                prediction[0],  # joint_1
+                prediction[1],  # joint_2 
+                prediction[2],  # joint_3
+                prediction[3],  # joint_4
+                prediction[4],  # joint_5
+                prediction[5]   # joint_6
+            )
+            if prediction[6] >= 0.9:
+                follower_arm.robot.hand.set_angle(-129.03999)  
+            else:
+                follower_arm.robot.hand.set_angle(-165.0) 
             
         except Exception as e:
             logger.error(f"Error: {e}")
