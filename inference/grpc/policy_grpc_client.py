@@ -229,7 +229,7 @@ def main():
     parser.add_argument("--inference_time_s", type=int, default=60, help="Inference time in seconds")
     parser.add_argument("--control_rate", type=int, default=1, help="Control rate in Hz")
     parser.add_argument("--queue_size", type=int, default=2, help="Queue size")
-    parser.add_argument("--warm_up", type=int, default=50, help="Warm-up time")
+    parser.add_argument("--warm_up", type=int, default=30, help="Warm-up time")
     args = parser.parse_args()
 
     logger_fibre = fibre.utils.Logger(verbose=True)
@@ -274,7 +274,12 @@ def main():
     for _ in range(inference_time_s * control_rate):
         # Read the follower state and access the frames from the cameras
         follow_joints = arm_controller.get_follow_joints()
-        current_state = follow_joints.tolist() + [0.0]
+        if follower_arm.robot.hand.angle < -165.0:
+            gripper = 0.0
+        else:
+            gripper = 1.0
+        current_state = follow_joints.tolist() + [gripper]
+        print("current_state: ", current_state)
 
         try:
             # Get image from video

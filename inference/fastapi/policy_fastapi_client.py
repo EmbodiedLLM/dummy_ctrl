@@ -135,8 +135,11 @@ for _ in range(inference_time_s * fps):
     # Read the follower state and access the frames from the cameras
     # observation = robot.capture_observation()
     follow_joints = arm_controller.get_follow_joints()
-    print("follow_joints: ", follow_joints)
-    current_state = follow_joints.tolist() + [0.0]
+    if follow_arm.robot.hand.angle < -165.0:
+        gripper = 0.0
+    else:
+        gripper = 1.0
+    current_state = follow_joints.tolist() + [gripper]
     print("current_state: ", current_state)
     # print("gt_action: ", gt_action)
     

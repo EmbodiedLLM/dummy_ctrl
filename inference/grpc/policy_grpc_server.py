@@ -14,6 +14,7 @@ from proto import policy_pb2_grpc
 
 # Import the ACT policy model
 from lerobot.common.policies.act.modeling_act import ACTPolicy
+from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy
 # Set PyTorch seed for reproducibility
 # seed = 1000
 # torch.manual_seed(seed)
@@ -36,6 +37,7 @@ import argparse
 # Set up argument parser
 parser = argparse.ArgumentParser(description="Policy gRPC Server")
 parser.add_argument("--model_path", type=str, required=True,help="Path to the pretrained policy model")
+parser.add_argument("--policy", type=str, required=True, help="Choose policy")
 args = parser.parse_args()
 PRETRAINED_POLICY_PATH = args.model_path
 
@@ -59,7 +61,10 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
         """Load the policy model from the pretrained path"""
         try:
             logger.info(f"Loading ACT policy from {PRETRAINED_POLICY_PATH}")
-            self.policy = ACTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
+            if args.policy == "act":
+                self.policy = ACTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
+            elif args.policy == "diffusion":
+                self.policy = DiffusionPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
             self.policy.to(device)
             self.policy.eval()  # Set to evaluation mode
             self.policy.reset()  # Reset policy state
