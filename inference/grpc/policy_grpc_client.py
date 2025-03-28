@@ -227,8 +227,9 @@ def main():
     parser.add_argument("--serial_number", default="396636713233", help="Serial number of the follower arm")
     parser.add_argument("--camera_url", default="http://192.168.65.124:8080/?action=stream", help="Camera URL")
     parser.add_argument("--inference_time_s", type=int, default=60, help="Inference time in seconds")
-    parser.add_argument("--control_rate", type=int, default=50, help="Control rate in Hz")
+    parser.add_argument("--control_rate", type=int, default=1, help="Control rate in Hz")
     parser.add_argument("--queue_size", type=int, default=2, help="Queue size")
+    parser.add_argument("--warm_up", type=int, default=50, help="Warm-up time")
     args = parser.parse_args()
 
     logger_fibre = fibre.utils.Logger(verbose=True)
@@ -237,9 +238,9 @@ def main():
     joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
     follower_arm.robot.set_enable(True)
     arm_controller = ArmAngle(None, follower_arm, joint_offset)
-    print("初始化视频流...")
+    print("initialize video stream...")
     stream = VideoStream(url=args.camera_url, queue_size=args.queue_size).start()
-    time.sleep(2.0)  # 等待视频流稳定
+    time.sleep(2.0) # Wait for stream to start
 
     # Create client
     client = PolicyClient(args.server)
@@ -254,7 +255,22 @@ def main():
 
     inference_time_s = args.inference_time_s
     control_rate = args.control_rate
+
+    logger.info(f"Begin {args.warm_up} warm-up...")
+    for step in range(args.warm_up):
+        follow_joints = arm_controller.get_follow_joints()
+        current_state = follow_joints.tolist() + [0.0]
+        
+        try:
+            observation = get_observation_from_stream(stream, current_state)
+            logger.info(f"Warm-up step {step + 1}/{args.warm_up}")
+        except Exception as e:
+            logger.error(f"Warm-up Error: {e}")
+        
+        precise_sleep(1 / control_rate, time_func=time.monotonic)
     
+    logger.info("Warm-up finish,  inference...")
+
     for _ in range(inference_time_s * control_rate):
         # Read the follower state and access the frames from the cameras
         follow_joints = arm_controller.get_follow_joints()

@@ -15,11 +15,11 @@ from proto import policy_pb2_grpc
 # Import the ACT policy model
 from lerobot.common.policies.act.modeling_act import ACTPolicy
 # Set PyTorch seed for reproducibility
-seed = 1000
-torch.manual_seed(seed)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # For multi-GPU setups
+# seed = 1000
+# torch.manual_seed(seed)
+# if torch.cuda.is_available():
+#     torch.cuda.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed)  # For multi-GPU setups
 
 
 # Configure logging
