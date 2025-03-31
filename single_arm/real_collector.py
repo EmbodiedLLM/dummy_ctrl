@@ -67,16 +67,16 @@ class LeRobotDataCollector:
         
         self.frame_count = 0
         self.start_time = None
-        
+
         # Temp directory for video encoding
         self.tmp_img_dir = self.output_dir / "tmp_images"
-        
+
         # Camera setup
         self.camera_url = camera_url
         self.cap = None
         if camera_url:
             self.setup_camera()
-            
+
     def setup_camera(self) -> bool:
         """Setup camera capture"""
         logger.info(f"Connecting to camera: {self.camera_url}")

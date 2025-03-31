@@ -112,7 +112,19 @@ def generate_metadata(
         "features": {
             "observation.images.cam_wrist": {
                 "dtype": "video",
-                "shape": [720, 1280, 3],
+                "shape": [240, 320, 3],
+                "names": ["height", "width", "channel"],
+                "video_info": {
+                    "video.fps": float(fps),
+                    "video.codec": "av1",
+                    "video.pix_fmt": "yuv420p",
+                    "video.is_depth_map": False,
+                    "has_audio": False
+                }
+            },
+            "observation.images.cam_head": {
+                "dtype": "video",
+                "shape": [240, 320, 3],
                 "names": ["height", "width", "channel"],
                 "video_info": {
                     "video.fps": float(fps),
@@ -169,10 +181,17 @@ def generate_metadata(
             }
             
             if use_video:
-                video_path = data_dir / f"videos/chunk-000/observation.images.cam_wrist/episode_{i:06d}.mp4"
-                video_stats = compute_video_stats(video_path)
-                if video_stats:
-                    stats["stats"]["observation.images.cam_wrist"] = video_stats
+                # 添加手腕摄像头统计信息
+                wrist_video_path = data_dir / f"videos/chunk-000/observation.images.cam_wrist/episode_{i:06d}.mp4"
+                wrist_video_stats = compute_video_stats(wrist_video_path)
+                if wrist_video_stats:
+                    stats["stats"]["observation.images.cam_wrist"] = wrist_video_stats
+                
+                # 添加头部摄像头统计信息
+                head_video_path = data_dir / f"videos/chunk-000/observation.images.cam_head/episode_{i:06d}.mp4"
+                head_video_stats = compute_video_stats(head_video_path)
+                if head_video_stats:
+                    stats["stats"]["observation.images.cam_head"] = head_video_stats
             
             f.write(json.dumps(stats) + "\n")
     
