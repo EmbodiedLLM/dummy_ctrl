@@ -20,13 +20,18 @@ message PredictRequest {
   int32 image_channels = 2;  // Number of channels (3 for RGB)
   
   // New fields for compressed image data
-  bytes encoded_image = 6;   // JPEG or other encoded image data
+  bytes encoded_image = 6;   // JPEG or other encoded image data for wrist camera
   string image_format = 7;   // Format of the encoded image (e.g., "jpeg")
   
   // Common fields
-  int32 image_height = 3;    // Height of the image
-  int32 image_width = 4;     // Width of the image
+  int32 image_height = 3;    // Height of the wrist camera image
+  int32 image_width = 4;     // Width of the wrist camera image
   repeated float state = 5 [packed=true]; // State vector (expected size: 7)
+  
+  // Second camera (head camera) fields
+  bytes encoded_image2 = 8;  // JPEG or other encoded image data for head camera
+  int32 image2_height = 9;   // Height of the head camera image
+  int32 image2_width = 10;   // Width of the head camera image
 }
 
 // Response message containing the predicted action

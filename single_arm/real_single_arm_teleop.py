@@ -17,28 +17,28 @@ logger = fibre.utils.Logger(verbose=True)
 # %%
 # Replace with new data collector and video collector
 data_collector = RobotDataCollector(
-    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_30",
+    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_new",
     fps=10,
     robot_type="thu_arm"
 )
 
 # Create one or more video collectors, all set to 320×240 resolution
 wrist_video_collector = VideoDataCollector(
-    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_30",
-    cam_url="http://192.168.65.124:8080/?action=stream",
+    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_new",
+    cam_url="http://192.168.237.249:8080/?action=stream",
     camera_name="cam_wrist",
     fps=10,
-    resolution=(320, 240),  # Set to 320×240 resolution
+    resolution=(1280, 720),  # Set to 1280×720 resolution
     robot_type="thu_arm"
 )
 
 # Similarly set the same resolution for the second camera
 head_video_collector = VideoDataCollector(
-    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_30",
-    cam_url="http://192.168.65.112:8080/?action=stream",
+    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_new",
+    cam_url="http://192.168.237.157:8080/?action=stream",
     camera_name="cam_head",
     fps=10,
-    resolution=(320, 240),  # Set to 320×240 resolution
+    resolution=(1280, 720),  # Set to 1280×720 resolution
     robot_type="thu_arm"
 )
 # %%

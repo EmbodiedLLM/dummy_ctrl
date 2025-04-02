@@ -62,8 +62,9 @@ logger = logging.getLogger(__name__)
 
 
 class VideoStream:
-    def __init__(self, url, queue_size=2):
+    def __init__(self, url, resolution=None, queue_size=2):
         self.url = url
+        self.resolution = resolution  # (width, height) or None for default
         self.queue = Queue(maxsize=queue_size)
         self.stopped = False
         
@@ -73,10 +74,27 @@ class VideoStream:
         
     def update(self):
         cap = cv2.VideoCapture(self.url)
+        
+        # Set resolution if specified
+        if self.resolution:
+            width, height = self.resolution
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            logger.info(f"Setting camera resolution to {width}x{height}")
+            
+        # Get actual resolution
+        actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        logger.info(f"Actual camera resolution: {actual_width}x{actual_height}")
+        
         while not self.stopped:
             if not cap.isOpened():
                 print("重新连接摄像头...")
                 cap = cv2.VideoCapture(self.url)
+                if self.resolution:
+                    width, height = self.resolution
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
                 time.sleep(1)
                 continue
                 
@@ -135,35 +153,55 @@ class PolicyClient:
             logger.error(f"Failed to get model info: {e}")
             return {"error": str(e)}
     
-    def predict(self, image: np.ndarray, state: List[float]) -> Tuple[List[float], float]:
+    def predict(self, image_wrist: np.ndarray, image_head: np.ndarray, state: List[float]) -> Tuple[List[float], float]:
         """
         Send prediction request to the server
         
         Args:
-            image: RGB image as numpy array (H, W, C)
+            image_wrist: Wrist camera RGB image as numpy array (H, W, C)
+            image_head: Head camera RGB image as numpy array (H, W, C), can be None
             state: State vector as list of floats
             
         Returns:
             Tuple of (prediction, inference_time_ms)
         """
         try:
-            # Convert numpy image to JPEG bytes
-            success, encoded_img = cv2.imencode('.jpg', (image * 255).astype(np.uint8))
-            if not success:
-                raise ValueError("Failed to encode image")
-            img_bytes = encoded_img.tobytes()
+            # Convert wrist camera image to JPEG bytes
+            success1, encoded_img1 = cv2.imencode('.jpg', (image_wrist * 255).astype(np.uint8))
+            if not success1:
+                raise ValueError("Failed to encode wrist camera image")
+            img_bytes1 = encoded_img1.tobytes()
             
-            # Get original image dimensions (for server to reconstruct)
-            img_height, img_width = image.shape[0], image.shape[1]
+            # Get wrist image dimensions
+            img1_height, img1_width = image_wrist.shape[0], image_wrist.shape[1]
             
-            # Create request with encoded image
+            # Create request with encoded images
             request = policy_pb2.PredictRequest(
-                encoded_image=img_bytes,
+                encoded_image=img_bytes1,  # Primary image (wrist)
                 image_format="jpeg",
-                image_height=img_height,
-                image_width=img_width,
+                image_height=img1_height,
+                image_width=img1_width,
                 state=state
             )
+            
+            # Add head camera image if provided
+            if image_head is not None:
+                success2, encoded_img2 = cv2.imencode('.jpg', (image_head * 255).astype(np.uint8))
+                if not success2:
+                    raise ValueError("Failed to encode head camera image")
+                img_bytes2 = encoded_img2.tobytes()
+                
+                # Get head image dimensions
+                img2_height, img2_width = image_head.shape[0], image_head.shape[1]
+                
+                # Add to request
+                request.encoded_image2 = img_bytes2
+                request.image2_height = img2_height
+                request.image2_width = img2_width
+                
+                logger.info(f"Sending both camera images - Wrist: {img1_width}x{img1_height}, Head: {img2_width}x{img2_height}")
+            else:
+                logger.info(f"Sending only wrist camera image: {img1_width}x{img1_height}")
             
             # Time the request
             start_time = time.perf_counter()
@@ -173,7 +211,13 @@ class PolicyClient:
             # Calculate round-trip time
             rtt_ms = (end_time - start_time) * 1000
             logger.info(f"Round-trip time: {rtt_ms:.2f}ms, Server inference time: {response.inference_time_ms:.2f}ms")
-            logger.info(f"Sent image bytes size: {len(img_bytes) / 1024:.2f}KB")
+            
+            # Log image sizes
+            wrist_size = len(img_bytes1) / 1024
+            logger.info(f"Sent wrist image size: {wrist_size:.2f}KB")
+            if image_head is not None:
+                head_size = len(img_bytes2) / 1024
+                logger.info(f"Sent head image size: {head_size:.2f}KB")
             
             return response.prediction, response.inference_time_ms
         
@@ -186,24 +230,40 @@ class PolicyClient:
         self.channel.close()
 
 
-def get_observation_from_stream(stream, state_data):
-    """从视频流和状态数据获取观察数据"""
-    frame = stream.read()
-    if frame is None:
-        raise ValueError("无法读取视频帧")
+def get_observation_from_streams(stream_wrist, stream_head, state_data):
+    """从两个视频流和状态数据获取观察数据"""
+    frame_wrist = stream_wrist.read()
+    if frame_wrist is None:
+        raise ValueError("无法读取wrist摄像头视频帧")
     
-    # 转换为RGB并归一化
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    frame = torch.from_numpy(frame).float() / 255.0  # 归一化到 0-1
-    print("frame: ", frame.shape)
+    # 转换wrist图像为RGB并归一化
+    frame_wrist = cv2.cvtColor(frame_wrist, cv2.COLOR_BGR2RGB)
+    frame_wrist = torch.from_numpy(frame_wrist).float() / 255.0  # 归一化到 0-1
+    
+    # 获取head摄像头数据（如果可用）
+    frame_head = None
+    if stream_head is not None:
+        frame_head = stream_head.read()
+        if frame_head is not None:
+            frame_head = cv2.cvtColor(frame_head, cv2.COLOR_BGR2RGB)
+            frame_head = torch.from_numpy(frame_head).float() / 255.0
+    
+    print("frame_wrist shape:", frame_wrist.shape)
+    if frame_head is not None:
+        print("frame_head shape:", frame_head.shape)
+    
     # 获取状态数据
     state_tensor = torch.tensor(state_data).float()
     
     # 创建 observation 字典
     observation = {
-        "observation.images.cam_wrist": frame,
+        "observation.images.cam_wrist": frame_wrist,
         "observation.state": state_tensor
     }
+    
+    # 添加head摄像头（如果可用）
+    if frame_head is not None:
+        observation["observation.images.cam_head"] = frame_head
     
     return observation
 
@@ -225,12 +285,24 @@ def main():
     parser = argparse.ArgumentParser(description="Policy gRPC Client")
     parser.add_argument("--server", default="localhost:50051", help="Server address")
     parser.add_argument("--serial_number", default="396636713233", help="Serial number of the follower arm")
-    parser.add_argument("--camera_url", default="http://192.168.65.124:8080/?action=stream", help="Camera URL")
+    parser.add_argument("--camera_wrist", default="http://192.168.237.249:8080/?action=stream", help="Wrist camera URL")
+    parser.add_argument("--camera_head", default="http://192.168.237.157:8080/?action=stream", help="Head camera URL (optional)")
+    parser.add_argument("--wrist_resolution", default="320x240", help="Wrist camera resolution (WxH)")
+    parser.add_argument("--head_resolution", default="320x240", help="Head camera resolution (WxH)")
     parser.add_argument("--inference_time_s", type=int, default=60, help="Inference time in seconds")
     parser.add_argument("--control_rate", type=int, default=1, help="Control rate in Hz")
     parser.add_argument("--queue_size", type=int, default=2, help="Queue size")
     parser.add_argument("--warm_up", type=int, default=30, help="Warm-up time")
     args = parser.parse_args()
+
+    # Parse camera resolutions
+    wrist_width, wrist_height = map(int, args.wrist_resolution.split('x'))
+    wrist_resolution = (wrist_width, wrist_height)
+    
+    head_resolution = None
+    if args.head_resolution:
+        head_width, head_height = map(int, args.head_resolution.split('x'))
+        head_resolution = (head_width, head_height)
 
     logger_fibre = fibre.utils.Logger(verbose=True)
     follower_arm = fibre.find_any(serial_number=args.serial_number, logger=logger_fibre)
@@ -238,9 +310,18 @@ def main():
     joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
     follower_arm.robot.set_enable(True)
     arm_controller = ArmAngle(None, follower_arm, joint_offset)
-    print("initialize video stream...")
-    stream = VideoStream(url=args.camera_url, queue_size=args.queue_size).start()
-    time.sleep(2.0) # Wait for stream to start
+    
+    # Initialize wrist camera
+    print("Initializing wrist camera stream...")
+    stream_wrist = VideoStream(url=args.camera_wrist, resolution=wrist_resolution, queue_size=args.queue_size).start()
+    
+    # Initialize head camera if URL provided
+    stream_head = None
+    if args.camera_head:
+        print("Initializing head camera stream...")
+        stream_head = VideoStream(url=args.camera_head, resolution=head_resolution, queue_size=args.queue_size).start()
+    
+    time.sleep(2.0)  # Wait for streams to start
 
     # Create client
     client = PolicyClient(args.server)
@@ -259,37 +340,44 @@ def main():
     logger.info(f"Begin {args.warm_up} warm-up...")
     for step in range(args.warm_up):
         follow_joints = arm_controller.get_follow_joints()
-        current_state = follow_joints.tolist() + [0.0]
+        current_state = follow_joints.tolist() + [follower_arm.robot.hand.angle]
         
         try:
-            observation = get_observation_from_stream(stream, current_state)
+            observation = get_observation_from_streams(stream_wrist, stream_head, current_state)
             logger.info(f"Warm-up step {step + 1}/{args.warm_up}")
         except Exception as e:
             logger.error(f"Warm-up Error: {e}")
         
         precise_sleep(1 / control_rate, time_func=time.monotonic)
     
-    logger.info("Warm-up finish,  inference...")
+    logger.info("Warm-up finish, inference...")
 
     for _ in range(inference_time_s * control_rate):
         # Read the follower state and access the frames from the cameras
         follow_joints = arm_controller.get_follow_joints()
-        if follower_arm.robot.hand.angle <= -158.0:
-            gripper = 0.0
-        else:
-            gripper = 1.0
+        gripper = follower_arm.robot.hand.angle
         current_state = follow_joints.tolist() + [gripper]
         print("current_state: ", current_state)
 
         try:
-            # Get image from video
-            observation = get_observation_from_stream(stream, current_state)
-            image = observation["observation.images.cam_wrist"].numpy()  # Get as numpy array, not list
+            # Get images from video streams
+            observation = get_observation_from_streams(stream_wrist, stream_head, current_state)
+            
+            # Get wrist camera image
+            image_wrist = observation["observation.images.cam_wrist"].numpy()
+            
+            # Get head camera image if available
+            image_head = None
+            if "observation.images.cam_head" in observation:
+                image_head = observation["observation.images.cam_head"].numpy()
+            
             state = observation["observation.state"].numpy().tolist()
-            # Make prediction
-            prediction, inference_time_ms = client.predict(image, state)
+            
+            # Make prediction with both images
+            prediction, inference_time_ms = client.predict(image_wrist, image_head, state)
             logger.info(f"Prediction: {prediction}")
             logger.info(f"Server inference time: {inference_time_ms:.2f}ms")
+            
             follower_arm.robot.move_j(
                 prediction[0],  # joint_1
                 prediction[1],  # joint_2 
@@ -298,14 +386,20 @@ def main():
                 prediction[4],  # joint_5
                 prediction[5]   # joint_6
             )
-            if prediction[6] >= 0.9:
-                follower_arm.robot.hand.set_angle(-129.03999)  
-            else:
-                follower_arm.robot.hand.set_angle(-165.0) 
-            
+            # if prediction[6] >= 0.9:
+            #     follower_arm.robot.hand.set_angle(-129.03999)  
+            # else:
+            #     follower_arm.robot.hand.set_angle(-165.0) 
+
+            follower_arm.robot.hand.set_angle(prediction[6]) 
         except Exception as e:
             logger.error(f"Error: {e}")
         precise_sleep(1 / control_rate, time_func=time.monotonic)
+    
+    # Clean up
+    stream_wrist.stop()
+    if stream_head:
+        stream_head.stop()
     client.close()
 
 

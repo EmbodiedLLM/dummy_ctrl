@@ -38,8 +38,17 @@ import argparse
 parser = argparse.ArgumentParser(description="Policy gRPC Server")
 parser.add_argument("--model_path", type=str, required=True,help="Path to the pretrained policy model")
 parser.add_argument("--policy", type=str, required=True, help="Choose policy")
+parser.add_argument("--target_resolution", type=str, default="480x640", help="Target resolution for resizing images (HxW)")
 args = parser.parse_args()
 PRETRAINED_POLICY_PATH = args.model_path
+
+# Parse target resolution
+try:
+    TARGET_HEIGHT, TARGET_WIDTH = map(int, args.target_resolution.split('x'))
+    logger.info(f"Target resolution set to {TARGET_HEIGHT}x{TARGET_WIDTH}")
+except Exception as e:
+    logger.warning(f"Invalid resolution format: {args.target_resolution}. Using default 480x640")
+    TARGET_HEIGHT, TARGET_WIDTH = 480, 640
 
 # Determine the device based on platform and availability
 if torch.cuda.is_available():
@@ -88,9 +97,14 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError(f"Failed to decode image with format {image_format}")
+        
+        # Resize image if needed
+        if height != TARGET_HEIGHT or width != TARGET_WIDTH:
+            img = cv2.resize(img, (TARGET_WIDTH, TARGET_HEIGHT))
+            logger.info(f"Resized image from {height}x{width} to {TARGET_HEIGHT}x{TARGET_WIDTH}")
+        
         # Normalize to [0, 1]
         img = img.astype(np.float32) / 255.0
-        assert img.shape == (height, width, 3), f"Image shape is {img.shape}, expected (height, width, 3)"
         # Convert to CHW format (channels, height, width)
         img = img.transpose(2, 0, 1)
         
@@ -100,35 +114,49 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
     def Predict(self, request, context):
         """Handle prediction requests"""
         try:
-            # Check if we have encoded image or raw image data
+            # Process first camera (cam_wrist)
             if request.encoded_image:
-                logger.info(f"Received encoded image in {request.image_format} format, size: {len(request.encoded_image)/1024:.2f}KB")
+                logger.info(f"Received encoded image (cam_wrist) in {request.image_format} format, size: {len(request.encoded_image)/1024:.2f}KB")
                 # Decode the encoded image
-                image_tensor = self.decode_image(
+                image_wrist = self.decode_image(
                     request.encoded_image,
                     request.image_format,
                     request.image_height,
                     request.image_width
                 )
             else:
-                # Use the original flat image data
-                logger.info("Received flat image data")
-                image_tensor = self.reshape_image(
-                    request.image, 
-                    request.image_channels, 
-                    request.image_height, 
-                    request.image_width
+                logger.info("No cam_wrist image received")
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("Missing cam_wrist image")
+                return policy_pb2.PredictResponse()
+                
+            # Process second camera (cam_head) if available
+            if hasattr(request, 'encoded_image2') and request.encoded_image2:
+                logger.info(f"Received encoded image (cam_head) in {request.image_format} format, size: {len(request.encoded_image2)/1024:.2f}KB")
+                # Decode the encoded image
+                image_head = self.decode_image(
+                    request.encoded_image2,
+                    request.image_format,
+                    request.image2_height,
+                    request.image2_width
                 )
+                has_head_camera = True
+            else:
+                logger.info("No cam_head image received, using only cam_wrist")
+                has_head_camera = False
             
             # Convert state data to tensor
             state_tensor = torch.tensor([request.state], dtype=torch.float)
             
-            logger.info(f"Processed input - Image shape: {image_tensor.shape}, State shape: {state_tensor.shape}")
-            
             # Validate input shapes
-            if image_tensor.shape[0] != 3:
+            if image_wrist.shape[0] != 3:
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details("Image must have 3 channels (RGB)")
+                return policy_pb2.PredictResponse()
+            
+            if has_head_camera and image_head.shape[0] != 3:
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("Second image must have 3 channels (RGB)")
                 return policy_pb2.PredictResponse()
             
             if state_tensor.shape != (1, 7):
@@ -137,15 +165,30 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
                 return policy_pb2.PredictResponse()
             
             # Move tensors to device
-            image_tensor = image_tensor.to(device)
+            image_wrist = image_wrist.to(device)
+            if has_head_camera:
+                image_head = image_head.to(device)
             state_tensor = state_tensor.to(device)
             
             # Create the policy input dictionary
             observation = {
                 "observation.state": state_tensor,
-                "observation.images.cam_wrist": image_tensor.unsqueeze(0),  # Add batch dimension
+                "observation.images.cam_wrist": image_wrist.unsqueeze(0),  # Add batch dimension
             }
             
+            # Add head camera if available
+            if has_head_camera:
+                # Check if the policy supports dual camera input
+                supports_dual_camera = False
+                if hasattr(self.policy.config, "input_features"):
+                    if "observation.images.cam_head" in self.policy.config.input_features:
+                        supports_dual_camera = True
+                
+                if supports_dual_camera:
+                    observation["observation.images.cam_head"] = image_head.unsqueeze(0)
+                    logger.info("Using dual camera mode (wrist + head)")
+                else:
+                    logger.warning("Second camera provided but model doesn't support dual camera mode. Using only wrist camera.")
             
             if self.policy is not None:
                 # Perform the prediction
@@ -155,6 +198,7 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
                 end_time = time.perf_counter()
                 inference_time_ms = (end_time - start_time) * 1000  # Convert to milliseconds
                 logger.info(f"Inference time: {inference_time_ms:.2f}ms")
+                logger.info(f"Used observations: {list(observation.keys())}")
 
                 prediction = action.squeeze(0).to("cpu")
                 logger.info(f"Prediction shape: {prediction.shape}")
@@ -183,12 +227,21 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
     def GetModelInfo(self, request, context):
         """Handle model info requests"""
         if self.policy is not None:
+            # Check if the policy supports dual camera input by looking at the config
+            supports_dual_camera = False
+            if hasattr(self.policy.config, "input_features"):
+                if "observation.images.cam_head" in self.policy.config.input_features:
+                    supports_dual_camera = True
+            
+            camera_info = "Dual camera mode (wrist+head)" if supports_dual_camera else "Single camera mode (wrist only)"
+            
             return policy_pb2.ModelInfoResponse(
                 status="loaded",
                 model_path=PRETRAINED_POLICY_PATH,
                 device=device,
                 input_features=str(self.policy.config.input_features) if hasattr(self.policy.config, "input_features") else "unknown",
-                output_features=str(self.policy.config.output_features) if hasattr(self.policy.config, "output_features") else "unknown"
+                output_features=str(self.policy.config.output_features) if hasattr(self.policy.config, "output_features") else "unknown",
+                message=f"Using image resolution: {TARGET_HEIGHT}x{TARGET_WIDTH}, {camera_info}"
             )
         else:
             return policy_pb2.ModelInfoResponse(
@@ -220,6 +273,7 @@ def serve():
     server.start()
     
     logger.info("Policy gRPC server started on port 50051")
+    logger.info(f"Using target resolution: {TARGET_HEIGHT}x{TARGET_WIDTH}")
     
     try:
         # Keep the server running until interrupted

@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0cpolicy.proto\x12\x06policy\"\xa6\x01\n\x0ePredictRequest\x12\x11\n\x05image\x18\x01 \x03(\x02\x42\x02\x10\x01\x12\x16\n\x0eimage_channels\x18\x02 \x01(\x05\x12\x15\n\rencoded_image\x18\x06 \x01(\x0c\x12\x14\n\x0cimage_format\x18\x07 \x01(\t\x12\x14\n\x0cimage_height\x18\x03 \x01(\x05\x12\x13\n\x0bimage_width\x18\x04 \x01(\x05\x12\x11\n\x05state\x18\x05 \x03(\x02\x42\x02\x10\x01\"D\n\x0fPredictResponse\x12\x16\n\nprediction\x18\x01 \x03(\x02\x42\x02\x10\x01\x12\x19\n\x11inference_time_ms\x18\x02 \x01(\x02\"\x14\n\x12HealthCheckRequest\"%\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\"\x12\n\x10ModelInfoRequest\"\x89\x01\n\x11ModelInfoResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x12\n\nmodel_path\x18\x02 \x01(\t\x12\x0e\n\x06\x64\x65vice\x18\x03 \x01(\t\x12\x16\n\x0einput_features\x18\x04 \x01(\t\x12\x17\n\x0foutput_features\x18\x05 \x01(\t\x12\x0f\n\x07message\x18\x06 \x01(\t2\xde\x01\n\rPolicyService\x12<\n\x07Predict\x12\x16.policy.PredictRequest\x1a\x17.policy.PredictResponse\"\x00\x12H\n\x0bHealthCheck\x12\x1a.policy.HealthCheckRequest\x1a\x1b.policy.HealthCheckResponse\"\x00\x12\x45\n\x0cGetModelInfo\x12\x18.policy.ModelInfoRequest\x1a\x19.policy.ModelInfoResponse\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0cpolicy.proto\x12\x06policy\"\xeb\x01\n\x0ePredictRequest\x12\x11\n\x05image\x18\x01 \x03(\x02\x42\x02\x10\x01\x12\x16\n\x0eimage_channels\x18\x02 \x01(\x05\x12\x15\n\rencoded_image\x18\x06 \x01(\x0c\x12\x14\n\x0cimage_format\x18\x07 \x01(\t\x12\x14\n\x0cimage_height\x18\x03 \x01(\x05\x12\x13\n\x0bimage_width\x18\x04 \x01(\x05\x12\x11\n\x05state\x18\x05 \x03(\x02\x42\x02\x10\x01\x12\x16\n\x0e\x65ncoded_image2\x18\x08 \x01(\x0c\x12\x15\n\rimage2_height\x18\t \x01(\x05\x12\x14\n\x0cimage2_width\x18\n \x01(\x05\"D\n\x0fPredictResponse\x12\x16\n\nprediction\x18\x01 \x03(\x02\x42\x02\x10\x01\x12\x19\n\x11inference_time_ms\x18\x02 \x01(\x02\"\x14\n\x12HealthCheckRequest\"%\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\"\x12\n\x10ModelInfoRequest\"\x89\x01\n\x11ModelInfoResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x12\n\nmodel_path\x18\x02 \x01(\t\x12\x0e\n\x06\x64\x65vice\x18\x03 \x01(\t\x12\x16\n\x0einput_features\x18\x04 \x01(\t\x12\x17\n\x0foutput_features\x18\x05 \x01(\t\x12\x0f\n\x07message\x18\x06 \x01(\t2\xde\x01\n\rPolicyService\x12<\n\x07Predict\x12\x16.policy.PredictRequest\x1a\x17.policy.PredictResponse\"\x00\x12H\n\x0bHealthCheck\x12\x1a.policy.HealthCheckRequest\x1a\x1b.policy.HealthCheckResponse\"\x00\x12\x45\n\x0cGetModelInfo\x12\x18.policy.ModelInfoRequest\x1a\x19.policy.ModelInfoResponse\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -28,17 +28,17 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_PREDICTRESPONSE'].fields_by_name['prediction']._options = None
   _globals['_PREDICTRESPONSE'].fields_by_name['prediction']._serialized_options = b'\020\001'
   _globals['_PREDICTREQUEST']._serialized_start=25
-  _globals['_PREDICTREQUEST']._serialized_end=191
-  _globals['_PREDICTRESPONSE']._serialized_start=193
-  _globals['_PREDICTRESPONSE']._serialized_end=261
-  _globals['_HEALTHCHECKREQUEST']._serialized_start=263
-  _globals['_HEALTHCHECKREQUEST']._serialized_end=283
-  _globals['_HEALTHCHECKRESPONSE']._serialized_start=285
-  _globals['_HEALTHCHECKRESPONSE']._serialized_end=322
-  _globals['_MODELINFOREQUEST']._serialized_start=324
-  _globals['_MODELINFOREQUEST']._serialized_end=342
-  _globals['_MODELINFORESPONSE']._serialized_start=345
-  _globals['_MODELINFORESPONSE']._serialized_end=482
-  _globals['_POLICYSERVICE']._serialized_start=485
-  _globals['_POLICYSERVICE']._serialized_end=707
+  _globals['_PREDICTREQUEST']._serialized_end=260
+  _globals['_PREDICTRESPONSE']._serialized_start=262
+  _globals['_PREDICTRESPONSE']._serialized_end=330
+  _globals['_HEALTHCHECKREQUEST']._serialized_start=332
+  _globals['_HEALTHCHECKREQUEST']._serialized_end=352
+  _globals['_HEALTHCHECKRESPONSE']._serialized_start=354
+  _globals['_HEALTHCHECKRESPONSE']._serialized_end=391
+  _globals['_MODELINFOREQUEST']._serialized_start=393
+  _globals['_MODELINFOREQUEST']._serialized_end=411
+  _globals['_MODELINFORESPONSE']._serialized_start=414
+  _globals['_MODELINFORESPONSE']._serialized_end=551
+  _globals['_POLICYSERVICE']._serialized_start=554
+  _globals['_POLICYSERVICE']._serialized_end=776
 # @@protoc_insertion_point(module_scope)
