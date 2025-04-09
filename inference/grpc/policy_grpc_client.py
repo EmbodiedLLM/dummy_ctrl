@@ -386,10 +386,12 @@ def main():
                 prediction[4],  # joint_5
                 prediction[5]   # joint_6
             )
-            # if prediction[6] >= 0.9:
-            #     follower_arm.robot.hand.set_angle(-129.03999)  
-            # else:
-            #     follower_arm.robot.hand.set_angle(-165.0) 
+            
+            if prediction[6] < -155.0:
+                angle = -165.0
+            else:
+                angle = prediction[6]
+            follower_arm.robot.hand.set_angle(angle)
 
             follower_arm.robot.hand.set_angle(prediction[6]) 
         except Exception as e:

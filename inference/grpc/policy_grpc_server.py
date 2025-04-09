@@ -15,6 +15,7 @@ from proto import policy_pb2_grpc
 # Import the ACT policy model
 from lerobot.common.policies.act.modeling_act import ACTPolicy
 from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy
+# from lerobot.common.policies.pi0.modeling_pi0 import PI0Policy
 # Set PyTorch seed for reproducibility
 # seed = 1000
 # torch.manual_seed(seed)
@@ -38,7 +39,7 @@ import argparse
 parser = argparse.ArgumentParser(description="Policy gRPC Server")
 parser.add_argument("--model_path", type=str, required=True,help="Path to the pretrained policy model")
 parser.add_argument("--policy", type=str, required=True, help="Choose policy")
-parser.add_argument("--target_resolution", type=str, default="480x640", help="Target resolution for resizing images (HxW)")
+parser.add_argument("--target_resolution", type=str, default="720x1280", help="Target resolution for resizing images (HxW)")
 args = parser.parse_args()
 PRETRAINED_POLICY_PATH = args.model_path
 
@@ -64,12 +65,13 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
     def __init__(self):
         super().__init__()
         self.policy = None
+        self.prediction_enabled = True  # Add this flag
         self.load_policy()
         
     def load_policy(self):
         """Load the policy model from the pretrained path"""
         try:
-            logger.info(f"Loading ACT policy from {PRETRAINED_POLICY_PATH}")
+            logger.info(f"Loading policy from {PRETRAINED_POLICY_PATH}")
             if args.policy == "act":
                 self.policy = ACTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
             elif args.policy == "diffusion":
@@ -77,7 +79,7 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
             self.policy.to(device)
             self.policy.eval()  # Set to evaluation mode
             self.policy.reset()  # Reset policy state
-            logger.info(f"Successfully loaded ACT policy")
+            logger.info(f"Successfully loaded policy")
         except Exception as e:
             self.policy = None
             # logger.error(f"Could not load ACT policy model: {e}")
@@ -114,6 +116,13 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
     def Predict(self, request, context):
         """Handle prediction requests"""
         try:
+            if not self.prediction_enabled:
+                logger.info("Prediction is currently disabled")
+                return policy_pb2.PredictResponse(
+                    prediction=[0.0] * 7,  # Return zeros when disabled
+                    inference_time_ms=0.0
+                )
+            
             # Process first camera (cam_wrist)
             if request.encoded_image:
                 logger.info(f"Received encoded image (cam_wrist) in {request.image_format} format, size: {len(request.encoded_image)/1024:.2f}KB")
@@ -250,6 +259,11 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
                 device=device,
                 message="Using placeholder prediction (ones tensor)"
             )
+
+    def SetPredictionEnabled(self, request, context):
+        """Handle enabling/disabling prediction"""
+        self.prediction_enabled = request.enabled
+        return policy_pb2.SetPredictionEnabledResponse(status="success")
 
 
 def serve():

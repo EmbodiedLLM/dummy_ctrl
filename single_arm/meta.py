@@ -112,7 +112,7 @@ def generate_metadata(
         "features": {
             "observation.images.cam_wrist": {
                 "dtype": "video",
-                "shape": [240, 320, 3],
+                "shape": [720, 1280, 3],
                 "names": ["height", "width", "channel"],
                 "video_info": {
                     "video.fps": float(fps),
@@ -124,7 +124,7 @@ def generate_metadata(
             },
             "observation.images.cam_head": {
                 "dtype": "video",
-                "shape": [240, 320, 3],
+                "shape": [720, 1280, 3],
                 "names": ["height", "width", "channel"],
                 "video_info": {
                     "video.fps": float(fps),

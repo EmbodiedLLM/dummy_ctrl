@@ -59,35 +59,55 @@ class PolicyClient:
             logger.error(f"Failed to get model info: {e}")
             return {"error": str(e)}
     
-    def predict(self, image: np.ndarray, state: List[float]) -> Tuple[List[float], float]:
+    def predict(self, image_wrist: np.ndarray, image_head: np.ndarray, state: List[float]) -> Tuple[List[float], float]:
         """
         Send prediction request to the server
         
         Args:
-            image: RGB image as numpy array (H, W, C)
+            image_wrist: Wrist camera RGB image as numpy array (H, W, C)
+            image_head: Head camera RGB image as numpy array (H, W, C), can be None
             state: State vector as list of floats
             
         Returns:
             Tuple of (prediction, inference_time_ms)
         """
         try:
-            # Convert numpy image to JPEG bytes
-            success, encoded_img = cv2.imencode('.jpg', (image * 255).astype(np.uint8))
-            if not success:
-                raise ValueError("Failed to encode image")
-            img_bytes = encoded_img.tobytes()
+            # Convert wrist camera image to JPEG bytes
+            success1, encoded_img1 = cv2.imencode('.jpg', (image_wrist * 255).astype(np.uint8))
+            if not success1:
+                raise ValueError("Failed to encode wrist camera image")
+            img_bytes1 = encoded_img1.tobytes()
             
-            # Get original image dimensions (for server to reconstruct)
-            img_height, img_width = image.shape[0], image.shape[1]
+            # Get wrist image dimensions
+            img1_height, img1_width = image_wrist.shape[0], image_wrist.shape[1]
             
-            # Create request with encoded image
+            # Create request with encoded images
             request = policy_pb2.PredictRequest(
-                encoded_image=img_bytes,
+                encoded_image=img_bytes1,  # Primary image (wrist)
                 image_format="jpeg",
-                image_height=img_height,
-                image_width=img_width,
+                image_height=img1_height,
+                image_width=img1_width,
                 state=state
             )
+            
+            # Add head camera image if provided
+            if image_head is not None:
+                success2, encoded_img2 = cv2.imencode('.jpg', (image_head * 255).astype(np.uint8))
+                if not success2:
+                    raise ValueError("Failed to encode head camera image")
+                img_bytes2 = encoded_img2.tobytes()
+                
+                # Get head image dimensions
+                img2_height, img2_width = image_head.shape[0], image_head.shape[1]
+                
+                # Add to request
+                request.encoded_image2 = img_bytes2
+                request.image2_height = img2_height
+                request.image2_width = img2_width
+                
+                logger.info(f"Sending both camera images - Wrist: {img1_width}x{img1_height}, Head: {img2_width}x{img2_height}")
+            else:
+                logger.info(f"Sending only wrist camera image: {img1_width}x{img1_height}")
             
             # Time the request
             start_time = time.perf_counter()
@@ -97,7 +117,13 @@ class PolicyClient:
             # Calculate round-trip time
             rtt_ms = (end_time - start_time) * 1000
             logger.info(f"Round-trip time: {rtt_ms:.2f}ms, Server inference time: {response.inference_time_ms:.2f}ms")
-            logger.info(f"Sent image bytes size: {len(img_bytes) / 1024:.2f}KB")
+            
+            # Log image sizes
+            wrist_size = len(img_bytes1) / 1024
+            logger.info(f"Sent wrist image size: {wrist_size:.2f}KB")
+            if image_head is not None:
+                head_size = len(img_bytes2) / 1024
+                logger.info(f"Sent head image size: {head_size:.2f}KB")
             
             return response.prediction, response.inference_time_ms
         
@@ -110,7 +136,7 @@ class PolicyClient:
         self.channel.close()
 
 
-def get_observation_from_video(video_path: str, frame_index: int = 0) -> np.ndarray:
+def get_observation_from_video(video_path: str, frame_index: int = 0) -> Tuple[np.ndarray, int]:
     """Load a frame from a video file"""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -170,10 +196,11 @@ def get_state_from_parquet(parquet_path: str, frame_index: int = 0) -> List[floa
 def main():
     parser = argparse.ArgumentParser(description="Policy gRPC Client")
     parser.add_argument("--server", default="localhost:50051", help="Server address")
-    parser.add_argument("--video", default="/Users/yinzi/Downloads/Dummy_V2_workspace/dummy_ai/dummy_ctrl/data/pick_cube_20demos/videos/chunk-000/observation.images.cam_wrist/episode_000021.mp4", help="Path to video file")
-    parser.add_argument("--parquet", default="/Users/yinzi/Downloads/Dummy_V2_workspace/dummy_ai/dummy_ctrl/data/pick_cube_20demos/data/chunk-000/episode_000021.parquet", help="Path to parquet file with state data")
+    parser.add_argument("--wrist_video", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/videos/chunk-000/observation.images.cam_wrist/episode_000000.mp4", help="Path to wrist camera video file")
+    parser.add_argument("--head_video", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/videos/chunk-000/observation.images.cam_head/episode_000000.mp4", help="Path to head camera video file (optional)")
+    parser.add_argument("--parquet", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/data/chunk-000/episode_000000.parquet", help="Path to parquet file with state data")
     parser.add_argument("--frame_start", type=int, default=0, help="Frame index to start")
-    parser.add_argument("--frame_end", type=int, default=100, help="Frame index to end (-1 for all frames)")
+    parser.add_argument("--frame_end", type=int, default=-1, help="Frame index to end (-1 for all frames)")
     args = parser.parse_args()
     
     # Create client
@@ -191,9 +218,9 @@ def main():
     df = pd.read_parquet(args.parquet)
     
     try:
-        # Get total number of frames
-        total_frames = get_total_frames(args.video)
-        logger.info(f"Total frames in video: {total_frames}")
+        # Get total number of frames from wrist video
+        total_frames = get_total_frames(args.wrist_video)
+        logger.info(f"Total frames in wrist video: {total_frames}")
         
         # Determine end frame
         end_frame = args.frame_end
@@ -201,6 +228,15 @@ def main():
             end_frame = total_frames - 1
             
         logger.info(f"Processing frames from {args.frame_start} to {end_frame}")
+        
+        # Check if head video is provided
+        has_head_video = args.head_video and args.head_video.strip()
+        if has_head_video:
+            head_frames = get_total_frames(args.head_video)
+            logger.info(f"Total frames in head video: {head_frames}")
+            if head_frames < total_frames:
+                logger.warning(f"Head video has fewer frames ({head_frames}) than wrist video ({total_frames})")
+                end_frame = min(end_frame, head_frames - 1)
         
         # Statistics tracking
         total_server_time = 0.0
@@ -211,8 +247,13 @@ def main():
         for frame_idx in range(args.frame_start, end_frame + 1):
             logger.info(f"Processing frame {frame_idx}/{end_frame}")
 
-            # Get image from video
-            image, _ = get_observation_from_video(args.video, frame_idx)
+            # Get wrist image from video
+            image_wrist, _ = get_observation_from_video(args.wrist_video, frame_idx)
+            
+            # Get head image from video if available
+            image_head = None
+            if has_head_video:
+                image_head, _ = get_observation_from_video(args.head_video, frame_idx)
             
             # Get state from dataframe
             state = df.iloc[frame_idx]['observation.state'].copy().tolist()
@@ -221,7 +262,7 @@ def main():
             start_time = time.perf_counter()
             
             # Make prediction
-            prediction, inference_time_ms = client.predict(image, state)
+            prediction, inference_time_ms = client.predict(image_wrist, image_head, state)
             
             # Calculate round-trip time
             end_time = time.perf_counter()

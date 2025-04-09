@@ -7,39 +7,23 @@ from pynput import keyboard
 import numpy as np
 import time
 import threading
-# Replace the original data collector with the new separated collector
-from single_arm.data_collector import RobotDataCollector
-from single_arm.video_collector import VideoDataCollector
+# Replace with the modified LeRobotDataCollector
+from single_arm.real_collector import LeRobotDataCollector
 from single_arm.arm_angle import ArmAngle
 from single_arm.bi_gripper_open import gripper_open
 # logger verbose=True
 logger = fibre.utils.Logger(verbose=True)
 # %%
-# Replace with new data collector and video collector
-data_collector = RobotDataCollector(
-    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_new",
+# Use the modified data collector with both cameras
+data_collector = LeRobotDataCollector(
+    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406",
     fps=10,
-    robot_type="thu_arm"
-)
-
-# Create one or more video collectors, all set to 320×240 resolution
-wrist_video_collector = VideoDataCollector(
-    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_new",
-    cam_url="http://192.168.237.249:8080/?action=stream",
-    camera_name="cam_wrist",
-    fps=10,
-    resolution=(1280, 720),  # Set to 1280×720 resolution
-    robot_type="thu_arm"
-)
-
-# Similarly set the same resolution for the second camera
-head_video_collector = VideoDataCollector(
-    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_new",
-    cam_url="http://192.168.237.157:8080/?action=stream",
-    camera_name="cam_head",
-    fps=10,
-    resolution=(1280, 720),  # Set to 1280×720 resolution
-    robot_type="thu_arm"
+    camera_urls={
+        "cam_wrist": "http://192.168.237.249:8080/?action=stream",
+        "cam_head": "http://192.168.237.157:8080/?action=stream"
+    },
+    robot_type="thu_arm",
+    use_video=True
 )
 # %%
 teach_arm = fibre.find_any(serial_number="208C31875253", logger=logger)
@@ -54,8 +38,8 @@ teach_arm.robot.set_enable(True)
 follow_arm.robot.set_enable(True)
 logger.info("Moving Teach Arm to Working Pose")
 logger.info("Moving Lead Arm to Working Pose")
-# teach_arm.robot.move_j(0, 0, 10, 0, 0, 0)
-# follow_arm.robot.move_j(0, 0, 10, 0, 0, 0)
+teach_arm.robot.move_j(0, 0, 90, 0, 0, 0)
+follow_arm.robot.move_j(0, 0, 90, 0, 0, 0)
 #%%
 teach_hand_init_angle = teach_arm.robot.hand.angle
 follow_hand_init_angle = follow_arm.robot.hand.angle
@@ -116,27 +100,23 @@ import time
 # rate = 0.02  # 50Hz
 rate = 0.1  # 10Hz
 
-# Start data and video collection simultaneously
+# Start data collection
 data_collector.start_episode()
-wrist_video_collector.start_episode()
-head_video_collector.start_episode()  # Second camera
 
 print("Starting data collection, press right Shift key to stop...")
 
 while not stop:
     start_time = time.time()
+    
+    # Step 1: Capture the robot state (teach and follow joints)
     teach_joints = arm_controller.get_teach_joints()
     follow_arm.robot.move_j(*teach_joints)
     follow_arm.robot.hand.set_angle(teach_arm.robot.hand.angle - teach_hand_init_angle + follow_hand_init_angle)
-    follow_joints= arm_controller.get_follow_joints()
-    # print(f"Current follower Joints (state): {follow_joints}")
-    # teach_hand, follow_hand = gripper_open(teach_arm.robot.hand.angle, follow_arm.robot.hand.angle)
-    # teach_hand = follow_hand
-    # teach_hand = teach_arm.robot.hand.angle
+    follow_joints = arm_controller.get_follow_joints()
     follow_hand = follow_arm.robot.hand.angle
     teach_hand = follow_hand
     
-    # Collect data and video separately
+    # Step 2: Collect data (robot state + camera frames)
     data_collector.collect_step(
         teach_joints=teach_joints,
         follow_joints=follow_joints,
@@ -145,9 +125,9 @@ while not stop:
         rate=rate
     )
     
-    # Collect video frames
-    wrist_video_collector.capture_and_save_frame()
-    head_video_collector.capture_and_save_frame()  # Second camera
+    # Log progress every 10 frames
+    if data_collector.frame_count % 10 == 0:
+        print(f"Frames collected: {data_collector.frame_count}")
     
     # Sleep precisely to maintain 10Hz
     elapsed = time.time() - start_time
@@ -162,19 +142,19 @@ while not stop:
 # %%
 teach_arm.robot.set_enable(True)
 follow_arm.robot.set_enable(True)
-teach_arm.robot.resting()
-follow_arm.robot.resting()
+# teach_arm.robot.resting()
+# follow_arm.robot.resting()
+teach_arm.robot.move_j(0, 0, 90, 0, 0, 0)
+follow_arm.robot.move_j(0, 0, 90, 0, 0, 0)
 # %%
 print("Program ended, saving data...")
-
-wrist_video_collector.flush_frames()
-head_video_collector.flush_frames()
-
 
 time.sleep(1)
 
 data_collector.save_episode()
-wrist_video_collector.save_video()
-head_video_collector.save_video() 
 print("Data collection completed")
+#%%
+teach_arm.robot.resting()
+follow_arm.robot.resting()
+
 # %%
