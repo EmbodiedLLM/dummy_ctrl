@@ -36,7 +36,7 @@ import sys
 from single_arm.arm_angle import ArmAngle
 
 from queue import Queue
-from threading import Thread
+from threading import Thread, Event
 import time
 
 def precise_sleep(dt: float, slack_time: float=0.001, time_func=time.monotonic):
@@ -281,15 +281,60 @@ def get_state_from_parquet(parquet_path: str, frame_index: int = 0) -> List[floa
         raise
 
 
+class KeyboardMonitor:
+    def __init__(self, follower_arm):
+        self.follower_arm = follower_arm
+        self.enabled = True
+        self.stop_event = Event()
+        self.thread = Thread(target=self._monitor_keyboard, daemon=True)
+        
+    def start(self):
+        self.thread.start()
+        return self
+        
+    def _monitor_keyboard(self):
+        import sys
+        import tty
+        import termios
+        import select
+        
+        logger.info("Keyboard monitor started. Press Enter to toggle enable/disable.")
+        logger.info(f"Current state: {'Enabled' if self.enabled else 'Disabled'}")
+        
+        # Save terminal settings
+        old_settings = termios.tcgetattr(sys.stdin)
+        try:
+            tty.setcbreak(sys.stdin.fileno())
+            
+            while not self.stop_event.is_set():
+                # Check if input is available (non-blocking)
+                if select.select([sys.stdin], [], [], 0.1)[0]:
+                    key = sys.stdin.read(1)
+                    # Check for Enter key (both '\n' and '\r' for compatibility)
+                    if key in ['\n', '\r']:
+                        self.enabled = not self.enabled
+                        self.follower_arm.robot.set_enable(self.enabled)
+                        status = "Enabled" if self.enabled else "Disabled"
+                        logger.info(f"Arm {status}")
+        finally:
+            # Restore terminal settings
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+    
+    def stop(self):
+        self.stop_event.set()
+        if self.thread.is_alive():
+            self.thread.join(timeout=1.0)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Policy gRPC Client")
     parser.add_argument("--server", default="localhost:50051", help="Server address")
     parser.add_argument("--serial_number", default="396636713233", help="Serial number of the follower arm")
     parser.add_argument("--camera_wrist", default="http://192.168.237.249:8080/?action=stream", help="Wrist camera URL")
     parser.add_argument("--camera_head", default="http://192.168.237.157:8080/?action=stream", help="Head camera URL (optional)")
-    parser.add_argument("--wrist_resolution", default="320x240", help="Wrist camera resolution (WxH)")
-    parser.add_argument("--head_resolution", default="320x240", help="Head camera resolution (WxH)")
-    parser.add_argument("--inference_time_s", type=int, default=60, help="Inference time in seconds")
+    parser.add_argument("--wrist_resolution", default="1280x720", help="Wrist camera resolution (WxH)")
+    parser.add_argument("--head_resolution", default="1280x720", help="Head camera resolution (WxH)")
+    parser.add_argument("--inference_time_s", type=int, default=300, help="Inference time in seconds")
     parser.add_argument("--control_rate", type=int, default=1, help="Control rate in Hz")
     parser.add_argument("--queue_size", type=int, default=2, help="Queue size")
     parser.add_argument("--warm_up", type=int, default=30, help="Warm-up time")
@@ -307,9 +352,13 @@ def main():
     logger_fibre = fibre.utils.Logger(verbose=True)
     follower_arm = fibre.find_any(serial_number=args.serial_number, logger=logger_fibre)
     follower_arm.robot.resting()
+    follower_arm.robot.move_j(0,0,90,0,0,0)
     joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
     follower_arm.robot.set_enable(True)
     arm_controller = ArmAngle(None, follower_arm, joint_offset)
+    
+    # Start keyboard monitor
+    keyboard_monitor = KeyboardMonitor(follower_arm).start()
     
     # Initialize wrist camera
     print("Initializing wrist camera stream...")
@@ -378,27 +427,27 @@ def main():
             logger.info(f"Prediction: {prediction}")
             logger.info(f"Server inference time: {inference_time_ms:.2f}ms")
             
-            follower_arm.robot.move_j(
-                prediction[0],  # joint_1
-                prediction[1],  # joint_2 
-                prediction[2],  # joint_3
-                prediction[3],  # joint_4
-                prediction[4],  # joint_5
-                prediction[5]   # joint_6
-            )
-            
-            if prediction[6] < -155.0:
-                angle = -165.0
-            else:
-                angle = prediction[6]
-            follower_arm.robot.hand.set_angle(angle)
-
-            follower_arm.robot.hand.set_angle(prediction[6]) 
+            # Only move arm if it's enabled
+            if keyboard_monitor.enabled:
+                follower_arm.robot.move_j(
+                    prediction[0],  # joint_1
+                    prediction[1],  # joint_2 
+                    prediction[2],  # joint_3
+                    prediction[3],  # joint_4
+                    prediction[4],  # joint_5
+                    prediction[5]   # joint_6
+                )
+                if prediction[6] < -155.0:
+                    angle = -165.0
+                else:
+                    angle = prediction[6]
+                follower_arm.robot.hand.set_angle(angle)
         except Exception as e:
             logger.error(f"Error: {e}")
         precise_sleep(1 / control_rate, time_func=time.monotonic)
     
     # Clean up
+    keyboard_monitor.stop()
     stream_wrist.stop()
     if stream_head:
         stream_head.stop()

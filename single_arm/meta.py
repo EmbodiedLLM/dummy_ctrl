@@ -4,6 +4,7 @@ import cv2
 from pathlib import Path
 import logging
 from datasets import load_dataset
+import pandas as pd
 from typing import Dict, List, Optional
 
 logging.basicConfig(level=logging.INFO)
@@ -71,7 +72,21 @@ def generate_metadata(
     fps: int = 50,
     use_video: bool = True
 ):
-    """Generate metadata files from existing dataset files"""
+    """Generate metadata files from existing dataset files
+    
+    This function scans through robot data (parquet files and videos),
+    extracts metadata including task information, and generates the necessary
+    metadata files for LeRobot format.
+    
+    Task data is read from the "task" column in each parquet file. Unique tasks
+    are identified across all episodes, and task_index values are assigned.
+    
+    Args:
+        data_dir: Path to the dataset directory
+        robot_type: Type of robot used for data collection
+        fps: Frames per second of the videos
+        use_video: Whether the dataset includes video files
+    """
     data_dir = Path(data_dir)
     meta_dir = data_dir / "meta"
     meta_dir.mkdir(exist_ok=True)
@@ -85,6 +100,8 @@ def generate_metadata(
     total_frames = 0
     episode_lengths = []
     all_episodes_data = []
+    all_episodes_tasks = []  # List to store tasks for each episode
+    unique_tasks = set()     # Set to track unique tasks across all episodes
     
     for parquet_file in parquet_files:
         dataset = load_dataset("parquet", data_files=str(parquet_file))["train"]
@@ -92,6 +109,33 @@ def generate_metadata(
         episode_lengths.append(length)
         total_frames += length
         all_episodes_data.append(dataset)
+        
+        # Extract task from this episode's data using pandas
+        try:
+            # Read the parquet file directly with pandas to check for task column
+            df = pd.read_parquet(parquet_file)
+            if "task" in df.columns:
+                # Use the first task in the episode (assuming task doesn't change within episode)
+                episode_task = df["task"].iloc[0]
+                all_episodes_tasks.append(episode_task)
+                unique_tasks.add(episode_task)
+                logger.info(f"Found task '{episode_task}' in {parquet_file}")
+            else:
+                # Default task if not found
+                default_task = "pick the cube into the box"
+                all_episodes_tasks.append(default_task)
+                unique_tasks.add(default_task)
+                logger.warning(f"No task column found in {parquet_file}, using default: '{default_task}'")
+        except Exception as e:
+            # Default task if there was an error
+            default_task = "pick the cube into the box"
+            all_episodes_tasks.append(default_task)
+            unique_tasks.add(default_task)
+            logger.error(f"Error reading task from {parquet_file}: {e}, using default: '{default_task}'")
+    
+    # Convert unique tasks to a list and create mapping
+    unique_tasks_list = list(unique_tasks)
+    task_to_index = {task: idx for idx, task in enumerate(unique_tasks_list)}
     
     # 1. Generate info.json
     info = {
@@ -99,7 +143,7 @@ def generate_metadata(
         "robot_type": robot_type,
         "total_episodes": total_episodes,
         "total_frames": total_frames,
-        "total_tasks": 1,
+        "total_tasks": len(unique_tasks_list),  # Update total tasks count
         "total_videos": total_episodes if use_video else 0,
         "total_chunks": 1,
         "chunks_size": 1000,
@@ -149,7 +193,12 @@ def generate_metadata(
             "timestamp": {"dtype": "float32", "shape": [1], "names": None},
             "next.done": {"dtype": "bool", "shape": [1], "names": None},
             "index": {"dtype": "int64", "shape": [1], "names": None},
-            "task_index": {"dtype": "int64", "shape": [1], "names": None}
+            "task_index": {"dtype": "int64", "shape": [1], "names": None},
+            "task": {"dtype": "string", "shape": [1], "names": None}  # Add task feature
+        },
+        "task_information": {
+            "task_count": len(unique_tasks_list),
+            "tasks": list(unique_tasks)
         }
     }
     
@@ -161,10 +210,31 @@ def generate_metadata(
         for i in range(total_episodes):
             episode_data = {
                 "episode_index": i,
-                "tasks": ["Pick the cube into the box"],
-                "length": episode_lengths[i]
+                "tasks": [all_episodes_tasks[i]],  # Use the actual task for this episode
+                "length": episode_lengths[i],
+                "task_index": task_to_index[all_episodes_tasks[i]]  # Add task index
             }
             f.write(json.dumps(episode_data) + "\n")
+            
+    # Validate task_index consistency between parquet files and task_to_index mapping
+    logger.info("Validating task_index consistency...")
+    for i, parquet_file in enumerate(parquet_files):
+        try:
+            df = pd.read_parquet(parquet_file)
+            if "task_index" in df.columns and "task" in df.columns:
+                # Check the first row's task_index value
+                file_task_index = df["task_index"].iloc[0]
+                file_task = df["task"].iloc[0]
+                expected_task_index = task_to_index[file_task]
+                
+                if file_task_index != expected_task_index:
+                    logger.warning(
+                        f"Task index mismatch in {parquet_file.name}: "
+                        f"File has task_index={file_task_index} for task '{file_task}', "
+                        f"but mapping gives task_index={expected_task_index}"
+                    )
+        except Exception as e:
+            logger.error(f"Error validating task_index in {parquet_file}: {e}")
     
     # 3. Generate episodes_stats.jsonl
     with open(meta_dir / "episodes_stats.jsonl", 'w') as f:
@@ -181,13 +251,13 @@ def generate_metadata(
             }
             
             if use_video:
-                # 添加手腕摄像头统计信息
+                # Add wrist camera statistics
                 wrist_video_path = data_dir / f"videos/chunk-000/observation.images.cam_wrist/episode_{i:06d}.mp4"
                 wrist_video_stats = compute_video_stats(wrist_video_path)
                 if wrist_video_stats:
                     stats["stats"]["observation.images.cam_wrist"] = wrist_video_stats
                 
-                # 添加头部摄像头统计信息
+                # Add head camera statistics
                 head_video_path = data_dir / f"videos/chunk-000/observation.images.cam_head/episode_{i:06d}.mp4"
                 head_video_stats = compute_video_stats(head_video_path)
                 if head_video_stats:
@@ -197,13 +267,15 @@ def generate_metadata(
     
     # 4. Generate tasks.jsonl
     with open(meta_dir / "tasks.jsonl", 'w') as f:
-        task_data = {
-            "task_index": 0,
-            "task": "Pick the cube into the box"
-        }
-        f.write(json.dumps(task_data) + "\n")
+        for task_index, task in enumerate(unique_tasks_list):
+            task_data = {
+                "task_index": task_index,
+                "task": task
+            }
+            f.write(json.dumps(task_data) + "\n")
     
-    logger.info(f"Generated metadata for {total_episodes} episodes and {total_frames} frames")
+    logger.info(f"Generated metadata for {total_episodes} episodes with {len(unique_tasks_list)} unique tasks and {total_frames} frames")
+    logger.info(f"Unique tasks found: {', '.join(unique_tasks_list)}")
 
 if __name__ == "__main__":
     import argparse

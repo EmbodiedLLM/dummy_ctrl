@@ -15,7 +15,8 @@ from proto import policy_pb2_grpc
 # Import the ACT policy model
 from lerobot.common.policies.act.modeling_act import ACTPolicy
 from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy
-# from lerobot.common.policies.pi0.modeling_pi0 import PI0Policy
+from lerobot.common.policies.pi0.modeling_pi0 import PI0Policy
+from lerobot.common.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
 # Set PyTorch seed for reproducibility
 # seed = 1000
 # torch.manual_seed(seed)
@@ -76,6 +77,10 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
                 self.policy = ACTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
             elif args.policy == "diffusion":
                 self.policy = DiffusionPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
+            elif args.policy == "pi0":
+                self.policy = PI0Policy.from_pretrained(PRETRAINED_POLICY_PATH)
+            elif args.policy == "pi0fast":
+                self.policy = PI0FASTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
             self.policy.to(device)
             self.policy.eval()  # Set to evaluation mode
             self.policy.reset()  # Reset policy state
@@ -118,6 +123,7 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
         try:
             if not self.prediction_enabled:
                 logger.info("Prediction is currently disabled")
+                
                 return policy_pb2.PredictResponse(
                     prediction=[0.0] * 7,  # Return zeros when disabled
                     inference_time_ms=0.0
@@ -198,6 +204,13 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
                     logger.info("Using dual camera mode (wrist + head)")
                 else:
                     logger.warning("Second camera provided but model doesn't support dual camera mode. Using only wrist camera.")
+            
+            # Add task parameter if using PI0Policy or PI0FASTPolicy
+            if args.policy == "pi0" or args.policy == "pi0fast":
+                # Default task instruction
+                default_task = "pick the cube into the box"
+                observation["task"] = [default_task]
+                logger.info(f"Added default task description for {args.policy.upper()}Policy: '{default_task}'")
             
             if self.policy is not None:
                 # Perform the prediction

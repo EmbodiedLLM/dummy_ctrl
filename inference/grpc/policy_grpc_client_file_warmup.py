@@ -28,7 +28,8 @@ import logging
 import pandas as pd
 from typing import Dict, Any, List, Tuple
 import io
-import random
+from queue import Queue
+from threading import Thread, Event
 from single_arm.arm_angle import ArmAngle
 
 from proto import policy_pb2
@@ -40,6 +41,19 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def precise_sleep(dt: float, slack_time: float=0.001, time_func=time.monotonic):
+    """
+    Use hybrid of time.sleep and spinning to minimize jitter.
+    Sleep dt - slack_time seconds first, then spin for the rest.
+    """
+    t_start = time_func()
+    if dt > slack_time:
+        time.sleep(dt - slack_time)
+    t_end = t_start + dt
+    while time_func() < t_end:
+        pass
+    return
 
 class VideoStream:
     def __init__(self, url, resolution=None, queue_size=2):
@@ -93,9 +107,49 @@ class VideoStream:
     def stop(self):
         self.stopped = True
 
-# Import Queue and Thread for real-time camera streams
-from queue import Queue
-from threading import Thread
+class KeyboardMonitor:
+    def __init__(self, follower_arm):
+        self.follower_arm = follower_arm
+        self.enabled = True
+        self.stop_event = Event()
+        self.thread = Thread(target=self._monitor_keyboard, daemon=True)
+        
+    def start(self):
+        self.thread.start()
+        return self
+        
+    def _monitor_keyboard(self):
+        import sys
+        import tty
+        import termios
+        import select
+        
+        logger.info("Keyboard monitor started. Press Enter to toggle enable/disable.")
+        logger.info(f"Current state: {'Enabled' if self.enabled else 'Disabled'}")
+        
+        # Save terminal settings
+        old_settings = termios.tcgetattr(sys.stdin)
+        try:
+            tty.setcbreak(sys.stdin.fileno())
+            
+            while not self.stop_event.is_set():
+                # Check if input is available (non-blocking)
+                if select.select([sys.stdin], [], [], 0.1)[0]:
+                    key = sys.stdin.read(1)
+                    # Check for Enter key (both '\n' and '\r' for compatibility)
+                    if key in ['\n', '\r']:
+                        self.enabled = not self.enabled
+                        self.follower_arm.robot.set_enable(self.enabled)
+                        status = "Enabled" if self.enabled else "Disabled"
+                        logger.info(f"Arm {status}")
+        finally:
+            # Restore terminal settings
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+    
+    def stop(self):
+        self.stop_event.set()
+        if self.thread.is_alive():
+            self.thread.join(timeout=1.0)
 
 class PolicyClient:
     def __init__(self, server_address: str = "localhost:50051"):
@@ -213,7 +267,6 @@ class PolicyClient:
         """Close the gRPC channel"""
         self.channel.close()
 
-
 def get_observation_from_video(video_path: str, frame_index: int = 0) -> Tuple[np.ndarray, int]:
     """Load a frame from a video file"""
     cap = cv2.VideoCapture(video_path)
@@ -246,18 +299,6 @@ def get_observation_from_video(video_path: str, frame_index: int = 0) -> Tuple[n
     cap.release()
     return frame, frame_count
 
-
-def get_total_frames(video_path: str) -> int:
-    """Get the total number of frames in a video"""
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise ValueError("Cannot open video file")
-    
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    cap.release()
-    return frame_count
-
-
 def get_state_from_parquet(parquet_path: str, frame_index: int = 0) -> List[float]:
     """Load state from a parquet file"""
     try:
@@ -269,7 +310,6 @@ def get_state_from_parquet(parquet_path: str, frame_index: int = 0) -> List[floa
     except Exception as e:
         logger.error(f"Failed to read state from parquet: {e}")
         raise
-
 
 def get_observation_from_streams(stream_wrist, stream_head):
     """Get observation from video streams"""
@@ -291,70 +331,57 @@ def get_observation_from_streams(stream_wrist, stream_head):
     
     return frame_wrist, frame_head
 
-
-def generate_random_state():
-    """Generate random state (joint angles and gripper)"""
-    # Generate random joint angles between -180 and 180 degrees
-    joints = np.random.uniform(-180, 180, 6)
-    
-    # Generate random gripper angle between -165 and 0 degrees
-    gripper = np.random.uniform(-165, 0)
-    
-    # Combine into a single state
-    state = np.concatenate([joints, [gripper]])
-    
-    return state.tolist()
-
-
-def generate_random_image(height=720, width=1280, channels=3):
-    """Generate a random RGB image"""
-    # Create structured random image with colored rectangles
-    img = np.zeros((height, width, channels), dtype=np.float32)
-    
-    # Create 5-10 random colored rectangles
-    num_rectangles = np.random.randint(5, 11)
-    for _ in range(num_rectangles):
-        # Random position and size
-        x1, y1 = np.random.randint(0, width), np.random.randint(0, height)
-        x2 = min(x1 + np.random.randint(50, 300), width)
-        y2 = min(y1 + np.random.randint(50, 300), height)
-        
-        # Random color
-        color = np.random.uniform(0, 1, 3)
-        
-        # Fill rectangle
-        img[y1:y2, x1:x2] = color
-    
-    return img
-
-
 def main():
-    parser = argparse.ArgumentParser(description="Policy gRPC Client with MoveJ")
+    parser = argparse.ArgumentParser(description="Policy gRPC Client with File Warmup")
     parser.add_argument("--server", default="localhost:50051", help="Server address")
-    parser.add_argument("--wrist_video", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/videos/chunk-000/observation.images.cam_wrist/episode_000000.mp4", help="Path to wrist camera video file (for image=mp4)")
-    parser.add_argument("--head_video", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/videos/chunk-000/observation.images.cam_head/episode_000000.mp4", help="Path to head camera video file (for image=mp4)")
-    parser.add_argument("--parquet", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/data/chunk-000/episode_000000.parquet", help="Path to parquet file with state data (for state=parquet)")
-    parser.add_argument("--frame_start", type=int, default=0, help="Frame index to start (for image=mp4)")
-    parser.add_argument("--frame_end", type=int, default=-1, help="Frame index to end, -1 for all frames (for image=mp4)")
+    parser.add_argument("--wrist_video", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/videos/chunk-000/observation.images.cam_wrist/episode_000000.mp4", help="Path to wrist camera video file (for warmup)")
+    parser.add_argument("--head_video", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/videos/chunk-000/observation.images.cam_head/episode_000000.mp4", help="Path to head camera video file (for warmup)")
+    parser.add_argument("--parquet", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/data/chunk-000/episode_000000.parquet", help="Path to parquet file with state data (for warmup)")
     parser.add_argument("--serial_number", default="396636713233", help="Serial number of the follower arm")
-    parser.add_argument("--camera_wrist", default="http://192.168.237.249:8080/?action=stream", help="Wrist camera URL (for image=real)")
-    parser.add_argument("--camera_head", default="http://192.168.237.157:8080/?action=stream", help="Head camera URL (for image=real)")
-    parser.add_argument("--wrist_resolution", default="1280x720", help="Wrist camera resolution (WxH) (for image=real)")
-    parser.add_argument("--head_resolution", default="1280x720", help="Head camera resolution (WxH) (for image=real)")
-    parser.add_argument("--image", default="mp4", choices=["real", "mp4", "random"], help="Image source: real=cameras, mp4=video files, random=generated images")
-    parser.add_argument("--state", default="parquet", choices=["real", "parquet", "random"], help="State source: real=from robot, parquet=from file, random=generated")
+    parser.add_argument("--camera_wrist", default="http://192.168.237.249:8080/?action=stream", help="Wrist camera URL (for real-time)")
+    parser.add_argument("--camera_head", default="http://192.168.237.157:8080/?action=stream", help="Head camera URL (for real-time)")
+    parser.add_argument("--wrist_resolution", default="1280x720", help="Wrist camera resolution (WxH)")
+    parser.add_argument("--head_resolution", default="1280x720", help="Head camera resolution (WxH)")
+    parser.add_argument("--warmup_frames", type=int, default=30, help="Number of frames to use for warmup")
+    parser.add_argument("--inference_time_s", type=int, default=60, help="Inference time after warmup in seconds")
+    parser.add_argument("--control_rate", type=int, default=1, help="Control rate in Hz")
     args = parser.parse_args()
     
     # Initialize robot arm
     logger_fibre = fibre.utils.Logger(verbose=True)
     follower_arm = fibre.find_any(serial_number=args.serial_number, logger=logger_fibre)
     follower_arm.robot.resting()
-    follower_arm.robot.move_j(0,0,90,0,0,0)
+    follower_arm.robot.move_j(0,0,90,0,0,0)  # Initial position
+
     joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
     follower_arm.robot.set_enable(True)
     arm_controller = ArmAngle(None, follower_arm, joint_offset)
     
-    # Create client
+    # Start keyboard monitor for toggling robot control
+    keyboard_monitor = KeyboardMonitor(follower_arm).start()
+    
+    # Parse camera resolutions
+    wrist_width, wrist_height = map(int, args.wrist_resolution.split('x'))
+    wrist_resolution = (wrist_width, wrist_height)
+    
+    head_resolution = None
+    if args.head_resolution:
+        head_width, head_height = map(int, args.head_resolution.split('x'))
+        head_resolution = (head_width, head_height)
+    
+    # Initialize camera streams (for real-time phase)
+    logger.info("Initializing wrist camera stream...")
+    stream_wrist = VideoStream(url=args.camera_wrist, resolution=wrist_resolution).start()
+    
+    stream_head = None
+    if args.camera_head:
+        logger.info("Initializing head camera stream...")
+        stream_head = VideoStream(url=args.camera_head, resolution=head_resolution).start()
+    
+    # Wait for streams to initialize
+    time.sleep(2.0)
+    
+    # Create gRPC client
     client = PolicyClient(args.server)
     
     # Check server health
@@ -365,142 +392,68 @@ def main():
     model_info = client.get_model_info()
     logger.info(f"Model info: {model_info}")
     
-    # Initialize streams for real camera option
-    stream_wrist = None
-    stream_head = None
-    if args.image == "real":
-        # Parse camera resolutions
-        wrist_width, wrist_height = map(int, args.wrist_resolution.split('x'))
-        wrist_resolution = (wrist_width, wrist_height)
-        
-        head_resolution = None
-        if args.head_resolution:
-            head_width, head_height = map(int, args.head_resolution.split('x'))
-            head_resolution = (head_width, head_height)
-        
-        # Initialize wrist camera
-        logger.info("Initializing wrist camera stream...")
-        stream_wrist = VideoStream(url=args.camera_wrist, resolution=wrist_resolution).start()
-        
-        # Initialize head camera if URL provided
-        if args.camera_head:
-            logger.info("Initializing head camera stream...")
-            stream_head = VideoStream(url=args.camera_head, resolution=head_resolution).start()
-        
-        # Wait for streams to initialize
-        time.sleep(2.0)
+    # Load DataFrame for parquet state
+    df = pd.read_parquet(args.parquet)
     
-    # Load DataFrame for parquet state option
-    df = None
-    if args.state == "parquet" or args.image == "mp4":
-        df = pd.read_parquet(args.parquet)
-    # Wait for 5 seconds after initial move_j
-    logger.info("Waiting for 5 seconds after initial move_j...")
-    time.sleep(5)  
+    # Wait after initial setup
+    logger.info("Waiting for 2 seconds after initial setup...")
+    time.sleep(2)
+    
     try:
-        # Determine number of frames for processing
-        total_frames = 1
-        end_frame = 0
-        
-        if args.image == "mp4":
-            # Get total number of frames from wrist video
-            total_frames = get_total_frames(args.wrist_video)
-            logger.info(f"Total frames in wrist video: {total_frames}")
+        # Phase 1: Warmup using saved data files
+        logger.info(f"=== Starting warmup phase with {args.warmup_frames} frames ===")
+        for frame_idx in range(args.warmup_frames):
+            logger.info(f"Warmup frame {frame_idx+1}/{args.warmup_frames}")
             
-            # Determine end frame
-            end_frame = args.frame_end
-            if end_frame == -1 or end_frame > total_frames:
-                end_frame = total_frames - 1
-                
-            logger.info(f"Processing frames from {args.frame_start} to {end_frame}")
+            # Get images from video files
+            image_wrist, _ = get_observation_from_video(args.wrist_video, frame_idx)
             
-            # Check if head video is provided
-            has_head_video = args.head_video and args.head_video.strip()
-            if has_head_video:
-                head_frames = get_total_frames(args.head_video)
-                logger.info(f"Total frames in head video: {head_frames}")
-                if head_frames < total_frames:
-                    logger.warning(f"Head video has fewer frames ({head_frames}) than wrist video ({total_frames})")
-                    end_frame = min(end_frame, head_frames - 1)
-        else:
-            # For real or random images, just set a single frame range for the loop
-            end_frame = 100  # Process 100 frames for real or random modes
-        
-        # Statistics tracking
-        total_server_time = 0.0
-        total_round_trip_time = 0.0
-        inference_count = 0
-        
-        # Process frames in range
-        for frame_idx in range(args.frame_start if args.image == "mp4" else 0, end_frame + 1):
-            logger.info(f"Processing frame {frame_idx}/{end_frame}")
-
-            # Get images based on the selected source
-            image_wrist = None
             image_head = None
+            if args.head_video:
+                image_head, _ = get_observation_from_video(args.head_video, frame_idx)
             
-            if args.image == "mp4":
-                # Get images from video files
-                image_wrist, _ = get_observation_from_video(args.wrist_video, frame_idx)
-                
-                has_head_video = args.head_video and args.head_video.strip()
-                if has_head_video:
-                    image_head, _ = get_observation_from_video(args.head_video, frame_idx)
-            
-            elif args.image == "real":
-                # Get images from camera streams
-                image_wrist, image_head = get_observation_from_streams(stream_wrist, stream_head)
-            
-            elif args.image == "random":
-                # Generate random images
-                image_wrist = generate_random_image(height=720, width=1280)
-                
-                # Also generate a random head image
-                image_head = generate_random_image(height=720, width=1280)
-            
-            # Get state based on the selected source
-            state = None
-            if args.state == "parquet":
-                # Get state from parquet file
-                if df is not None:
-                    state = df.iloc[frame_idx]['observation.state'].copy().tolist()
-                else:
-                    raise ValueError("DataFrame not loaded for parquet state")
-            
-            elif args.state == "real":
-                # Get state from robot arm
-                follow_joints = arm_controller.get_follow_joints()
-                gripper = follower_arm.robot.hand.angle
-                state = follow_joints.tolist() + [gripper]
-            
-            elif args.state == "random":
-                # Generate random state
-                state = generate_random_state()
-            
-            # Time the entire process
-            start_time = time.perf_counter()
+            # Get state from parquet file
+            state = df.iloc[frame_idx]['observation.state'].copy().tolist()
             
             # Make prediction
             prediction, inference_time_ms = client.predict(image_wrist, image_head, state)
             
-            # Calculate round-trip time
-            end_time = time.perf_counter()
-            round_trip_ms = (end_time - start_time) * 1000
+            # Display results
+            logger.info(f"Warmup prediction: {prediction}")
+            logger.info(f"Server time: {inference_time_ms:.2f}ms")
             
-            # Update statistics
-            total_server_time += inference_time_ms
-            total_round_trip_time += round_trip_ms
-            inference_count += 1
+            # Small delay between warmup frames
+            time.sleep(0.5)
+        
+        logger.info("=== Warmup phase completed ===")
+        
+        # Phase 2: Real-time inference and control
+        logger.info(f"=== Starting real-time phase for {args.inference_time_s} seconds ===")
+        
+        # Calculate number of control steps
+        control_steps = args.inference_time_s * args.control_rate
+        
+        for step in range(control_steps):
+            logger.info(f"Real-time step {step+1}/{control_steps}")
             
-            # Get ground truth for comparison if available
-            gt = None
-            if args.state == "parquet" and df is not None:
-                gt = df.iloc[frame_idx]['action']
+            # Get current robot state
+            follow_joints = arm_controller.get_follow_joints()
+            gripper = follower_arm.robot.hand.angle
+            current_state = follow_joints.tolist() + [gripper]
+            logger.info(f"Current state: {current_state}")
             
-            # Move robot arm based on prediction
-            if prediction:
-                # Skip the first 10 frames - don't move the robot
-                if frame_idx >= 10:
+            try:
+                # Get images from camera streams
+                image_wrist, image_head = get_observation_from_streams(stream_wrist, stream_head)
+                
+                # Make prediction
+                prediction, inference_time_ms = client.predict(image_wrist, image_head, current_state)
+                
+                logger.info(f"Prediction: {prediction}")
+                logger.info(f"Server inference time: {inference_time_ms:.2f}ms")
+                
+                # Move robot based on prediction if enabled
+                if keyboard_monitor.enabled and prediction:
                     follower_arm.robot.move_j(
                         prediction[0],  # joint_1
                         prediction[1],  # joint_2 
@@ -509,49 +462,33 @@ def main():
                         prediction[4],  # joint_5
                         prediction[5]   # joint_6
                     )
+                    
                     if prediction[6] < -155.0:
                         angle = -165.0
                     else:
                         angle = prediction[6]
                     follower_arm.robot.hand.set_angle(angle)
-                else:
-                    logger.info(f"Skipping robot movement for frame {frame_idx} (first 10 frames)")
+                    
+            except Exception as e:
+                logger.error(f"Error in real-time phase: {e}")
             
-            # Display results
-            logger.info(f"Frame {frame_idx} - Server time: {inference_time_ms:.2f}ms, Round-trip: {round_trip_ms:.2f}ms")
-            logger.info(f"Prediction: {prediction}")
-            
-            if gt is not None:
-                logger.info(f"Ground truth: {gt.tolist()}")
-                logger.info(f"Difference: {np.round(np.array(prediction) - np.array(gt.tolist()), 2)}")
-            
-            # Add small delay between frames for real and random modes
-            if args.image != "mp4":
-                time.sleep(0.1)
-                
-            # Break loop if using only one frame or if Ctrl+C is pressed
-            if args.image != "mp4" and frame_idx >= 100:
-                break
-            
-        # Display summary statistics
-        if inference_count > 0:
-            logger.info("\n--- Performance Summary ---")
-            logger.info(f"Processed {inference_count} frames")
-            logger.info(f"Average server inference time: {total_server_time / inference_count:.2f}ms")
-            logger.info(f"Average round-trip time: {total_round_trip_time / inference_count:.2f}ms")
-            logger.info(f"Total processing time: {total_round_trip_time / 1000:.2f}s")
+            # Sleep to maintain control rate
+            precise_sleep(1 / args.control_rate)
             
     except Exception as e:
         logger.error(f"Error: {e}")
     finally:
         # Clean up resources
+        logger.info("Cleaning up resources...")
         if stream_wrist:
             stream_wrist.stop()
         if stream_head:
             stream_head.stop()
         
+        keyboard_monitor.stop()
         follower_arm.robot.resting()
         client.close()
+        logger.info("Done.")
 
 
 if __name__ == "__main__":

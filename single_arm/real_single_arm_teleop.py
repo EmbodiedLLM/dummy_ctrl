@@ -16,7 +16,7 @@ logger = fibre.utils.Logger(verbose=True)
 # %%
 # Use the modified data collector with both cameras
 data_collector = LeRobotDataCollector(
-    output_dir="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406",
+    output_dir="/Users/jack/Desktop/dummy_ctrl/data/pick_place_0411",
     fps=10,
     camera_urls={
         "cam_wrist": "http://192.168.237.249:8080/?action=stream",
@@ -98,10 +98,10 @@ input_thread.start()
 
 import time
 # rate = 0.02  # 50Hz
-rate = 0.1  # 10Hz
+rate = 0.1 # 10Hz
 
 # Start data collection
-data_collector.start_episode()
+data_collector.start_episode(task="pick the green cube into the box")
 
 print("Starting data collection, press right Shift key to stop...")
 
@@ -110,6 +110,7 @@ while not stop:
     
     # Step 1: Capture the robot state (teach and follow joints)
     teach_joints = arm_controller.get_teach_joints()
+    print(f"Teach joints: {teach_joints}")
     follow_arm.robot.move_j(*teach_joints)
     follow_arm.robot.hand.set_angle(teach_arm.robot.hand.angle - teach_hand_init_angle + follow_hand_init_angle)
     follow_joints = arm_controller.get_follow_joints()
@@ -122,7 +123,6 @@ while not stop:
         follow_joints=follow_joints,
         teach_gripper=teach_hand,
         follow_gripper=follow_hand,
-        rate=rate
     )
     
     # Log progress every 10 frames
@@ -153,8 +153,6 @@ time.sleep(1)
 
 data_collector.save_episode()
 print("Data collection completed")
-#%%
+ #%%
 teach_arm.robot.resting()
 follow_arm.robot.resting()
-
-# %%

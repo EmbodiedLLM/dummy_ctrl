@@ -8,9 +8,9 @@ import logging
 import cv2
 import os
 import shutil
-from safetensors.torch import save_file
+import pandas as pd
+# from safetensors.torch import save_file
 from typing import Optional, Dict, List, Tuple
-from datasets import Dataset
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,9 +22,20 @@ class LeRobotDataCollector:
         fps: int = 10, 
         camera_urls: Optional[Dict[str, str]] = None,
         robot_type: str = "custom", 
-        use_video: bool = True
+        use_video: bool = True,
+        task: str = "pick the cube into the box"  # Default task for PI0 models
     ):
-        """Initialize data collector with camera support that follows LeRobot format"""
+        """Initialize data collector with camera support that follows LeRobot format
+        
+        Args:
+            output_dir: Directory to save collected data
+            fps: Frames per second for video recording
+            camera_urls: Dictionary mapping camera names to URLs
+            robot_type: Type of robot being used
+            use_video: Whether to save video data
+            task: Natural language task instruction for PI0 models. This is 
+                 required by PI0/PI0FAST policies for inference.
+        """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -57,6 +68,7 @@ class LeRobotDataCollector:
         self.total_frames = 0
         self.robot_type = robot_type
         self.use_video = use_video
+        self.task = task  # Store the task instruction for PI0 models
         self.episode_data_index = {"from": [], "to": []}
         self.episode_lengths = []
         # Current episode data
@@ -68,7 +80,8 @@ class LeRobotDataCollector:
             "timestamp": [],
             "next.done": [],
             "index": [],
-            "task_index": []
+            "task_index": [],
+            "task": []  # Add task field for PI0 models
         }
         
         self.frame_count = 0
@@ -110,8 +123,25 @@ class LeRobotDataCollector:
                 
         return success
         
-    def start_episode(self):
-        """Start new episode recording"""
+    def set_task(self, task: str):
+        """Set the current task instruction for PI0 models
+        
+        Args:
+            task: Natural language task instruction
+        """
+        self.task = task
+        logger.info(f"Set current task to: {task}")
+        
+    def start_episode(self, task: Optional[str] = None):
+        """Start new episode recording
+        
+        Args:
+            task: Optional task instruction for this episode. 
+                 If provided, it will update the current task.
+        """
+        if task is not None:
+            self.set_task(task)
+            
         self.start_time = time.time()
         self.frame_count = 0
         
@@ -152,11 +182,11 @@ class LeRobotDataCollector:
         
         logger.info(f"Started episode {self.episode_count}")
         
-    def collect_step(self, teach_joints, follow_joints, teach_gripper, follow_gripper, rate):
+    def collect_step(self, teach_joints, follow_joints, teach_gripper, follow_gripper):
         """Collect one timestep of data"""
         if self.start_time is None:
             self.start_episode()
-
+        rate = 1 / self.fps
         # Use fixed timestamp increment of rate seconds
         timestamp = np.float64(self.frame_count * rate)
         
@@ -234,6 +264,8 @@ class LeRobotDataCollector:
         self.current_episode_data["next.done"].append(False)
         self.current_episode_data["index"].append(self.total_frames + self.frame_count)
         self.current_episode_data["task_index"].append(0)
+        # Add task instruction for PI0 compatibility
+        self.current_episode_data["task"].append(self.task)
         
         self.frame_count += 1
         
@@ -323,8 +355,9 @@ class LeRobotDataCollector:
         parquet_filename = f"episode_{next_index:06d}.parquet"
         parquet_path = self.current_chunk_dir / parquet_filename
         
-        dataset = Dataset.from_dict(self.current_episode_data)
-        dataset.to_parquet(str(parquet_path))
+        # Convert dictionary to pandas DataFrame and save as parquet
+        df = pd.DataFrame(self.current_episode_data)
+        df.to_parquet(str(parquet_path))
         logger.info(f"Parquet saved to {parquet_path}")
         
         # Update counters
