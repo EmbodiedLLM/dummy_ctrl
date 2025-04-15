@@ -351,7 +351,7 @@ def main():
     logger_fibre = fibre.utils.Logger(verbose=True)
     follower_arm = fibre.find_any(serial_number=args.serial_number, logger=logger_fibre)
     follower_arm.robot.resting()
-    follower_arm.robot.move_j(0,0,90,0,0,0)  # Initial position
+    follower_arm.robot.move_j(0, -30, 90, 0, 70, 0)  # Initial position
 
     joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
     follower_arm.robot.set_enable(True)

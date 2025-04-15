@@ -36,8 +36,8 @@ teleop_config.interface_kwargs.single_arm = {
 teleop = TeleopPolicy(teleop_config)
 teleop.start()
 #%%
-from dummy_env_sim import make_dual_arm_dummy_env_sim
-env = make_dual_arm_dummy_env_sim()
+from dummy_env_sim import make_single_arm_dummy_env_sim
+env = make_single_arm_dummy_env_sim()
 observation, info = env.reset()
 #%%
 left_arm.robot.set_enable(False)
@@ -65,3 +65,5 @@ while True:
     elapsed = time.monotonic() - start_time
     sleep_time = max(0, 1/freq - elapsed)
     time.sleep(sleep_time)
+
+# %%

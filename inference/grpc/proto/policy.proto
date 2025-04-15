@@ -32,6 +32,9 @@ message PredictRequest {
   bytes encoded_image2 = 8;  // JPEG or other encoded image data for head camera
   int32 image2_height = 9;   // Height of the head camera image
   int32 image2_width = 10;   // Width of the head camera image
+  
+  // Task description for language-conditioned policies (PI0, PI0fast)
+  string task = 11;          // Task description (e.g., "pick the cube into the box")
 }
 
 // Response message containing the predicted action

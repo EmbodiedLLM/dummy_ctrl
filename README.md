@@ -22,7 +22,8 @@ This project uses `uv` for Python environment management. Set up the environment
 uv venv
 source .venv/bin/activate
 uv sync
-uv pip install pyusb
+uv pip install pyusb pynput 
+uv pip install -r requirements.txt
 ```
 
 This will create a virtual environment and install all required dependencies.

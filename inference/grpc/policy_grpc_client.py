@@ -153,7 +153,7 @@ class PolicyClient:
             logger.error(f"Failed to get model info: {e}")
             return {"error": str(e)}
     
-    def predict(self, image_wrist: np.ndarray, image_head: np.ndarray, state: List[float]) -> Tuple[List[float], float]:
+    def predict(self, image_wrist: np.ndarray, image_head: np.ndarray, state: List[float], task: str = None) -> Tuple[List[float], float]:
         """
         Send prediction request to the server
         
@@ -161,6 +161,7 @@ class PolicyClient:
             image_wrist: Wrist camera RGB image as numpy array (H, W, C)
             image_head: Head camera RGB image as numpy array (H, W, C), can be None
             state: State vector as list of floats
+            task: Task description for language-conditioned policies
             
         Returns:
             Tuple of (prediction, inference_time_ms)
@@ -183,6 +184,11 @@ class PolicyClient:
                 image_width=img1_width,
                 state=state
             )
+            
+            # Add task if provided
+            if task:
+                request.task = task
+                logger.info(f"Added task: '{task}'")
             
             # Add head camera image if provided
             if image_head is not None:
@@ -335,9 +341,10 @@ def main():
     parser.add_argument("--wrist_resolution", default="1280x720", help="Wrist camera resolution (WxH)")
     parser.add_argument("--head_resolution", default="1280x720", help="Head camera resolution (WxH)")
     parser.add_argument("--inference_time_s", type=int, default=300, help="Inference time in seconds")
-    parser.add_argument("--control_rate", type=int, default=1, help="Control rate in Hz")
+    parser.add_argument("--control_rate", type=int, default=10, help="Control rate in Hz")
     parser.add_argument("--queue_size", type=int, default=2, help="Queue size")
     parser.add_argument("--warm_up", type=int, default=30, help="Warm-up time")
+    parser.add_argument("--task", type=str, default="pick the cube into the box", help="Task description for language-conditioned policies")
     args = parser.parse_args()
 
     # Parse camera resolutions
@@ -352,7 +359,7 @@ def main():
     logger_fibre = fibre.utils.Logger(verbose=True)
     follower_arm = fibre.find_any(serial_number=args.serial_number, logger=logger_fibre)
     follower_arm.robot.resting()
-    follower_arm.robot.move_j(0,0,90,0,0,0)
+    follower_arm.robot.move_j(0, -30, 90, 0, 70, 0)
     joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
     follower_arm.robot.set_enable(True)
     arm_controller = ArmAngle(None, follower_arm, joint_offset)
@@ -385,28 +392,26 @@ def main():
 
     inference_time_s = args.inference_time_s
     control_rate = args.control_rate
+    warm_up = args.warm_up
 
-    logger.info(f"Begin {args.warm_up} warm-up...")
-    for step in range(args.warm_up):
-        follow_joints = arm_controller.get_follow_joints()
-        current_state = follow_joints.tolist() + [follower_arm.robot.hand.angle]
-        
-        try:
-            observation = get_observation_from_streams(stream_wrist, stream_head, current_state)
-            logger.info(f"Warm-up step {step + 1}/{args.warm_up}")
-        except Exception as e:
-            logger.error(f"Warm-up Error: {e}")
-        
-        precise_sleep(1 / control_rate, time_func=time.monotonic)
-    
-    logger.info("Warm-up finish, inference...")
+    logger.info(f"Begin with {warm_up} warm-up steps...")
 
-    for _ in range(inference_time_s * control_rate):
+    # Combined loop for warm-up and inference
+    total_steps = warm_up + (inference_time_s * control_rate)
+    for step in range(total_steps):
+        is_warmup = step < warm_up
+        if is_warmup:
+            logger.info(f"Warm-up step {step + 1}/{warm_up}")
+        elif step == warm_up:
+            logger.info("Warm-up finished, starting inference...")
+
         # Read the follower state and access the frames from the cameras
         follow_joints = arm_controller.get_follow_joints()
         gripper = follower_arm.robot.hand.angle
         current_state = follow_joints.tolist() + [gripper]
-        print("current_state: ", current_state)
+        
+        if not is_warmup:
+            print("current_state: ", current_state)
 
         try:
             # Get images from video streams
@@ -422,13 +427,13 @@ def main():
             
             state = observation["observation.state"].numpy().tolist()
             
-            # Make prediction with both images
-            prediction, inference_time_ms = client.predict(image_wrist, image_head, state)
+            # Make prediction with both images (for both warm-up and inference)
+            prediction, inference_time_ms = client.predict(image_wrist, image_head, state, args.task)
             logger.info(f"Prediction: {prediction}")
             logger.info(f"Server inference time: {inference_time_ms:.2f}ms")
             
-            # Only move arm if it's enabled
-            if keyboard_monitor.enabled:
+            # Only move arm if not in warm-up and it's enabled
+            if not is_warmup and keyboard_monitor.enabled:
                 follower_arm.robot.move_j(
                     prediction[0],  # joint_1
                     prediction[1],  # joint_2 
@@ -443,7 +448,9 @@ def main():
                     angle = prediction[6]
                 follower_arm.robot.hand.set_angle(angle)
         except Exception as e:
-            logger.error(f"Error: {e}")
+            error_type = "Warm-up" if is_warmup else "Inference"
+            logger.error(f"{error_type} Error: {e}")
+            
         precise_sleep(1 / control_rate, time_func=time.monotonic)
     
     # Clean up

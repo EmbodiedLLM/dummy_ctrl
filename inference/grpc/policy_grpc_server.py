@@ -41,6 +41,7 @@ parser = argparse.ArgumentParser(description="Policy gRPC Server")
 parser.add_argument("--model_path", type=str, required=True,help="Path to the pretrained policy model")
 parser.add_argument("--policy", type=str, required=True, help="Choose policy")
 parser.add_argument("--target_resolution", type=str, default="720x1280", help="Target resolution for resizing images (HxW)")
+parser.add_argument("--task", type=str, default="pick the cube into the box", help="Default task description for PI0/PI0fast policies")
 args = parser.parse_args()
 PRETRAINED_POLICY_PATH = args.model_path
 
@@ -205,12 +206,11 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
                 else:
                     logger.warning("Second camera provided but model doesn't support dual camera mode. Using only wrist camera.")
             
-            # Add task parameter if using PI0Policy or PI0FASTPolicy
+            # Add task from request if provided and using PI0/PI0FAST policy
             if args.policy == "pi0" or args.policy == "pi0fast":
-                # Default task instruction
-                default_task = "pick the cube into the box"
-                observation["task"] = [default_task]
-                logger.info(f"Added default task description for {args.policy.upper()}Policy: '{default_task}'")
+                if hasattr(request, 'task') and request.task:
+                    observation["task"] = [request.task]
+                    logger.info(f"Using task from client: '{request.task}'")
             
             if self.policy is not None:
                 # Perform the prediction

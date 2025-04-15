@@ -16,7 +16,7 @@ logger = fibre.utils.Logger(verbose=True)
 # %%
 # Use the modified data collector with both cameras
 data_collector = LeRobotDataCollector(
-    output_dir="/Users/jack/Desktop/dummy_ctrl/data/pick_place_0411",
+    output_dir="/Users/jack/lab_intern/dummy_ctrl/data/pick_place_0414",
     fps=10,
     camera_urls={
         "cam_wrist": "http://192.168.237.249:8080/?action=stream",
@@ -38,8 +38,8 @@ teach_arm.robot.set_enable(True)
 follow_arm.robot.set_enable(True)
 logger.info("Moving Teach Arm to Working Pose")
 logger.info("Moving Lead Arm to Working Pose")
-teach_arm.robot.move_j(0, 0, 90, 0, 0, 0)
-follow_arm.robot.move_j(0, 0, 90, 0, 0, 0)
+teach_arm.robot.move_j(0, -30, 90, 0, 70, 0)
+follow_arm.robot.move_j(0, -30, 90, 0, 70, 0)
 #%%
 teach_hand_init_angle = teach_arm.robot.hand.angle
 follow_hand_init_angle = follow_arm.robot.hand.angle
@@ -101,7 +101,7 @@ import time
 rate = 0.1 # 10Hz
 
 # Start data collection
-data_collector.start_episode(task="pick the green cube into the box")
+data_collector.start_episode(task="pick the purple cube into the box")
 
 print("Starting data collection, press right Shift key to stop...")
 
@@ -144,8 +144,8 @@ teach_arm.robot.set_enable(True)
 follow_arm.robot.set_enable(True)
 # teach_arm.robot.resting()
 # follow_arm.robot.resting()
-teach_arm.robot.move_j(0, 0, 90, 0, 0, 0)
-follow_arm.robot.move_j(0, 0, 90, 0, 0, 0)
+teach_arm.robot.move_j(0, -30, 90, 0, 70, 0)
+follow_arm.robot.move_j(0, -30, 90, 0, 70, 0)
 # %%
 print("Program ended, saving data...")
 
@@ -156,3 +156,5 @@ print("Data collection completed")
  #%%
 teach_arm.robot.resting()
 follow_arm.robot.resting()
+
+# %%
