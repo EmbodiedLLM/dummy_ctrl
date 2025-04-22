@@ -8,3 +8,4 @@ torch>=2.0.0
 pyarrow>=6.0.0
 fastparquet>=0.8.0 
 protobuf
+scipy
