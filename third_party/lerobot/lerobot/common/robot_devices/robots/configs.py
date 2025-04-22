@@ -27,6 +27,7 @@ from lerobot.common.robot_devices.motors.configs import (
     DynamixelMotorsBusConfig,
     FeetechMotorsBusConfig,
     MotorsBusConfig,
+    DummyMotorsBusConfig,
 )
 
 
@@ -611,3 +612,61 @@ class LeKiwiRobotConfig(RobotConfig):
     )
 
     mock: bool = False
+
+@RobotConfig.register_subclass("dummy")
+@dataclass
+class DummyRobotConfig(RobotConfig):
+    inference_time: bool
+    
+    leader_arm: dict[str, MotorsBusConfig] = field(
+        default_factory=lambda: {
+            "main": DummyMotorsBusConfig(
+                port="/dev/tty.usbmodem208C31875253",
+                motors={
+                    # name: (index, model)
+                    "joint_1": [1, "dummy"],
+                    "joint_2": [2, "dummy"],
+                    "joint_3": [3, "dummy"],
+                    "joint_4": [4, "dummy"],
+                    "joint_5": [5, "dummy"],
+                    "joint_6": [6, "dummy"],
+                    "gripper": (7, "dummy"),
+                },
+            ),
+        }
+    ) 
+
+    follower_arm: dict[str, MotorsBusConfig] = field(
+        default_factory=lambda: {
+            "main": DummyMotorsBusConfig(
+                port="/dev/tty.usbmodem396636713233",
+                motors={
+                    # name: (index, model)
+                    "joint_1": [1, "dummy"],
+                    "joint_2": [2, "dummy"],
+                    "joint_3": [3, "dummy"],
+                    "joint_4": [4, "dummy"],
+                    "joint_5": [5, "dummy"],
+                    "joint_6": [6, "dummy"],
+                    "gripper": (7, "dummy"),
+                },
+            ),
+        }
+    )
+
+    cameras: dict[str, CameraConfig] = field(
+        default_factory=lambda: {
+            "cam_wrist": OpenCVCameraConfig(
+                camera_index=0,
+                fps=10,
+                width=1280,
+                height=720,
+            ),
+            "cam_head": OpenCVCameraConfig(
+                camera_index=1,
+                fps=10,
+                width=1280,
+                height=720,
+            ),
+        }
+    )
