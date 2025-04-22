@@ -196,11 +196,12 @@ def get_state_from_parquet(parquet_path: str, frame_index: int = 0) -> List[floa
 def main():
     parser = argparse.ArgumentParser(description="Policy gRPC Client")
     parser.add_argument("--server", default="localhost:50051", help="Server address")
-    parser.add_argument("--wrist_video", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/videos/chunk-000/observation.images.cam_wrist/episode_000000.mp4", help="Path to wrist camera video file")
-    parser.add_argument("--head_video", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/videos/chunk-000/observation.images.cam_head/episode_000000.mp4", help="Path to head camera video file (optional)")
-    parser.add_argument("--parquet", default="/Users/jack/Desktop/dummy_ctrl/datasets/pick_place_0406/data/chunk-000/episode_000000.parquet", help="Path to parquet file with state data")
+    parser.add_argument("--wrist_video", default="/Users/jack/lab_intern/dummy_ctrl/data/pick_place_0414/videos/chunk-000/observation.images.cam_wrist/episode_000054.mp4", help="Path to wrist camera video file")
+    parser.add_argument("--head_video", default="/Users/jack/lab_intern/dummy_ctrl/data/pick_place_0414/videos/chunk-000/observation.images.cam_head/episode_000054.mp4", help="Path to head camera video file (optional)")
+    parser.add_argument("--parquet", default="/Users/jack/lab_intern/dummy_ctrl/data/pick_place_0414/data/chunk-000/episode_000054.parquet", help="Path to parquet file with state data")
     parser.add_argument("--frame_start", type=int, default=0, help="Frame index to start")
     parser.add_argument("--frame_end", type=int, default=-1, help="Frame index to end (-1 for all frames)")
+    parser.add_argument("--input", default="all", choices=["all", "image"], help="Input mode: 'all' uses dataset states for each frame, 'image' uses previous predictions")
     args = parser.parse_args()
     
     # Create client
@@ -243,6 +244,14 @@ def main():
         total_round_trip_time = 0.0
         inference_count = 0
         
+        # For 'image' mode, we'll keep track of the current state
+        if args.input == "image":
+            current_state = df.iloc[args.frame_start]['observation.state'].copy().tolist()
+            logger.info(f"Initial state: {[round(x, 2) for x in current_state]}")
+            # For comparing prediction with ground truth
+            all_predictions = []
+            all_ground_truths = []
+        
         # Process frames in range
         for frame_idx in range(args.frame_start, end_frame + 1):
             logger.info(f"Processing frame {frame_idx}/{end_frame}")
@@ -255,8 +264,13 @@ def main():
             if has_head_video:
                 image_head, _ = get_observation_from_video(args.head_video, frame_idx)
             
-            # Get state from dataframe
-            state = df.iloc[frame_idx]['observation.state'].copy().tolist()
+            # Get input state based on mode
+            if args.input == "all":
+                # Use state from the dataset for each frame
+                state = df.iloc[frame_idx]['observation.state'].copy().tolist()
+            else:  # args.input == "image"
+                # Use current state (which is either initial or previous prediction)
+                state = current_state
             
             # Time the entire process
             start_time = time.perf_counter()
@@ -273,22 +287,66 @@ def main():
             total_round_trip_time += round_trip_ms
             inference_count += 1
             
-            # Get ground truth for comparison
-            gt = df.iloc[frame_idx]['action']
-            
-            # Display results
-            logger.info(f"Frame {frame_idx} - Server time: {inference_time_ms:.2f}ms, Round-trip: {round_trip_ms:.2f}ms")
-            logger.info(f"Ground truth: {gt.tolist()}")
-            logger.info(f"Prediction: {prediction}")
-            logger.info(f"Difference: {np.round(np.array(prediction) - np.array(gt.tolist()), 2)}")
+            # Handle results based on input mode
+            if args.input == "all":
+                # Display results with appropriate ground truth comparison (from inference_all)
+                if frame_idx < end_frame:  # Make sure we're not at the last frame
+                    # Get next state as ground truth for comparison
+                    gt = df.iloc[frame_idx + 1]['observation.state'].copy().tolist()
+                    
+                    # Display results
+                    logger.info(f"Frame {frame_idx} - Server time: {inference_time_ms:.2f}ms, Round-trip: {round_trip_ms:.2f}ms")
+                    logger.info(f"Current state: {[round(x, 2) for x in state]}")
+                    logger.info(f"Prediction: {[round(x, 2) for x in prediction]}")
+                    logger.info(f"Next state (ground truth): {[round(x, 2) for x in gt]}")
+                    logger.info(f"Difference (prediction vs next state): {np.round(np.array(prediction) - np.array(gt), 2)}")
+                    logger.info("---")
+                else:
+                    # For the last frame, we don't have a next state to compare with
+                    logger.info(f"Frame {frame_idx} - Server time: {inference_time_ms:.2f}ms, Round-trip: {round_trip_ms:.2f}ms")
+                    logger.info(f"Current state: {[round(x, 2) for x in state]}")
+                    logger.info(f"Prediction: {[round(x, 2) for x in prediction]}")
+                    logger.info("Last frame - no next state available for comparison")
+                    logger.info("---")
+            else:  # args.input == "image"
+                # Display results (from inference_img)
+                ground_truth_state = df.iloc[frame_idx]['observation.state'].copy().tolist()
+                
+                # Store for analysis
+                all_predictions.append(prediction)
+                all_ground_truths.append(ground_truth_state)
+                
+                # Display results
+                logger.info(f"Frame {frame_idx} - Server time: {inference_time_ms:.2f}ms, Round-trip: {round_trip_ms:.2f}ms")
+                logger.info(f"Current state (input): {[round(x, 2) for x in current_state]}")
+                logger.info(f"Prediction (next state): {[round(x, 2) for x in prediction]}")
+                logger.info(f"Ground truth state: {[round(x, 2) for x in ground_truth_state]}")
+                logger.info(f"Difference (prediction vs ground truth): {np.round(np.array(prediction) - np.array(ground_truth_state), 2)}")
+                logger.info("---")
+                
+                # Update current state with prediction for next iteration
+                current_state = prediction
             
         # Display summary statistics
         if inference_count > 0:
             logger.info("\n--- Performance Summary ---")
+            logger.info(f"Input mode: {args.input}")
             logger.info(f"Processed {inference_count} frames")
             logger.info(f"Average server inference time: {total_server_time / inference_count:.2f}ms")
             logger.info(f"Average round-trip time: {total_round_trip_time / inference_count:.2f}ms")
             logger.info(f"Total processing time: {total_round_trip_time / 1000:.2f}s")
+            
+            # Add additional metrics for 'image' mode
+            if args.input == "image" and len(all_predictions) > 0:
+                # Convert lists to numpy arrays for easier calculation
+                predictions_array = np.array(all_predictions)
+                ground_truths_array = np.array(all_ground_truths)
+                
+                # Calculate mean absolute error for each joint
+                mae = np.mean(np.abs(predictions_array - ground_truths_array), axis=0)
+                
+                logger.info(f"Mean absolute error per joint: {mae}")
+                logger.info(f"Overall MAE: {np.mean(mae):.4f}")
             
     except Exception as e:
         logger.error(f"Error: {e}")

@@ -7,13 +7,15 @@ wheels/
 *.egg-info
 datasets/
 misc/
-
+act/
 # Virtual environments
 .venv
-
+.vscode/
 *.cache
 .cache/
 *.github
 .github/
 checkpoints/
 data/
+log/
+wandb/

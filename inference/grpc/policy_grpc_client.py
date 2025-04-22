@@ -1,6 +1,32 @@
 import os
 import sys
 from pathlib import Path
+import glob
+import json
+import numpy as np
+import time
+import cv2
+import argparse
+import logging
+import pandas as pd
+from typing import Dict, Any, List, Tuple
+import io
+
+# Add current directory to path to ensure modules can be found
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+
+# Import WandB visualization module - try both relative and absolute import
+from wandb_visualizer import (
+    TrajectoryVisualizer, 
+    DataLogger, 
+    ensure_wandb_login, 
+    force_create_wandb_project, 
+    disable_wandb_sync,
+    forward_kinematics
+)
+
 
 def find_project_root(current_dir, marker_files=(".git", "pyproject.toml", "setup.py")):
     current_dir = Path(current_dir).absolute()
@@ -21,23 +47,14 @@ sys.path.append(str(project_root))
 import fibre
 import grpc
 import torch
-import numpy as np
-import time
-import cv2
-import argparse
-import logging
-import pandas as pd
-from typing import Dict, Any, List, Tuple
-import io
+from datetime import datetime
+from queue import Queue
+from threading import Thread, Event
 
 from proto import policy_pb2
 from proto import policy_pb2_grpc
-import sys
 from single_arm.arm_angle import ArmAngle
 
-from queue import Queue
-from threading import Thread, Event
-import time
 
 def precise_sleep(dt: float, slack_time: float=0.001, time_func=time.monotonic):
     """
@@ -89,7 +106,7 @@ class VideoStream:
         
         while not self.stopped:
             if not cap.isOpened():
-                print("重新连接摄像头...")
+                print("Reconnecting camera...")
                 cap = cv2.VideoCapture(self.url)
                 if self.resolution:
                     width, height = self.resolution
@@ -103,7 +120,7 @@ class VideoStream:
                 if not self.queue.full():
                     self.queue.put(frame)
             else:
-                time.sleep(0.01)  # 避免CPU过度使用
+                time.sleep(0.01)  # Avoid excessive CPU usage
                 
         cap.release()
         
@@ -112,6 +129,7 @@ class VideoStream:
         
     def stop(self):
         self.stopped = True
+
 
 class PolicyClient:
     def __init__(self, server_address: str = "localhost:50051"):
@@ -237,16 +255,16 @@ class PolicyClient:
 
 
 def get_observation_from_streams(stream_wrist, stream_head, state_data):
-    """从两个视频流和状态数据获取观察数据"""
+    """Get observation data from video streams and state data"""
     frame_wrist = stream_wrist.read()
     if frame_wrist is None:
-        raise ValueError("无法读取wrist摄像头视频帧")
+        raise ValueError("Unable to read frame from wrist camera")
     
-    # 转换wrist图像为RGB并归一化
+    # Convert wrist image to RGB and normalize
     frame_wrist = cv2.cvtColor(frame_wrist, cv2.COLOR_BGR2RGB)
-    frame_wrist = torch.from_numpy(frame_wrist).float() / 255.0  # 归一化到 0-1
+    frame_wrist = torch.from_numpy(frame_wrist).float() / 255.0  # Normalize to 0-1
     
-    # 获取head摄像头数据（如果可用）
+    # Get head camera data (if available)
     frame_head = None
     if stream_head is not None:
         frame_head = stream_head.read()
@@ -258,16 +276,16 @@ def get_observation_from_streams(stream_wrist, stream_head, state_data):
     if frame_head is not None:
         print("frame_head shape:", frame_head.shape)
     
-    # 获取状态数据
+    # Get state data
     state_tensor = torch.tensor(state_data).float()
     
-    # 创建 observation 字典
+    # Create observation dictionary
     observation = {
         "observation.images.cam_wrist": frame_wrist,
         "observation.state": state_tensor
     }
     
-    # 添加head摄像头（如果可用）
+    # Add head camera if available
     if frame_head is not None:
         observation["observation.images.cam_head"] = frame_head
     
@@ -343,9 +361,108 @@ def main():
     parser.add_argument("--inference_time_s", type=int, default=300, help="Inference time in seconds")
     parser.add_argument("--control_rate", type=int, default=10, help="Control rate in Hz")
     parser.add_argument("--queue_size", type=int, default=2, help="Queue size")
-    parser.add_argument("--warm_up", type=int, default=30, help="Warm-up time")
+    parser.add_argument("--warm_up", type=int, default=20, help="Warm-up time")
     parser.add_argument("--task", type=str, default="pick the cube into the box", help="Task description for language-conditioned policies")
+    parser.add_argument("--log_dir", type=str, default="/Users/jack/lab_intern/dummy_ctrl/log/lerobot_dp_traj", help="Directory to save log data")
+    parser.add_argument("--use_wandb", action="store_true", default=True, help="Enable logging to Weights & Biases")
+    parser.add_argument("--wandb_project", type=str, default="lerobot_dp_traj", help="WandB project name")
+    parser.add_argument("--wandb_entity", type=str, default=None, help="WandB entity/username")
+    parser.add_argument("--wandb_api_key", type=str, default=None, help="WandB API key (alternative to using wandb login)")
+    parser.add_argument("--disable_wandb_sync", action="store_true", help="Disable WandB process sync (use thread mode)")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode with verbose logging")
     args = parser.parse_args()
+
+    # 设置日志级别
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        print("启用调试模式 - 显示详细日志")
+        
+        # 添加一个专门的wandb调试日志处理器
+        try:
+            import wandb
+            wandb.setup(settings=wandb.Settings(console="debug"))
+            print("WandB调试日志已启用")
+        except Exception as e:
+            print(f"无法设置WandB调试: {e}")
+    else:
+        logging.getLogger().setLevel(logging.INFO)
+
+    # Disable WandB process sync if requested
+    if args.disable_wandb_sync:
+        disable_wandb_sync()
+
+    # Set WandB environment variables if specified
+    if args.wandb_entity:
+        os.environ["WANDB_ENTITY"] = args.wandb_entity
+    
+    # Set WandB API key if provided
+    if args.wandb_api_key:
+        os.environ["WANDB_API_KEY"] = args.wandb_api_key
+        logger.info("Using provided WandB API key")
+    
+    # 为了避免相对导入问题，确保当前目录在Python路径中
+    current_file_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_file_dir not in sys.path:
+        sys.path.append(current_file_dir)
+        print(f"添加当前目录到Python路径: {current_file_dir}")
+    
+    # 尝试直接导入wandb_visualizer模块
+    try:
+        # 首先尝试直接导入
+        if args.use_wandb:
+            # 确保能找到wandb_visualizer模块
+            import importlib.util
+            module_path = os.path.join(current_file_dir, "wandb_visualizer.py")
+            if os.path.exists(module_path):
+                print(f"找到wandb_visualizer模块: {module_path}")
+            else:
+                print(f"警告: 未找到wandb_visualizer模块: {module_path}")
+                
+            # 显示当前环境和可用模块
+            try:
+                import wandb
+                print(f"WandB版本: {wandb.__version__}")
+                print(f"WandB API密钥可用: {wandb.api.api_key is not None}")
+            except Exception as e:
+                print(f"导入和检查WandB时出错: {e}")
+                
+            # 设置项目名称环境变量
+            os.environ["WANDB_PROJECT"] = args.wandb_project
+            print(f"设置WandB项目名: {args.wandb_project}")
+            
+            # 尝试登录
+            print("正在尝试登录WandB...")
+            try:
+                # ---> MODIFIED: Only attempt interactive login if no API key is found <---
+                if not os.environ.get("WANDB_API_KEY"):
+                    logger.info("未检测到 WANDB_API_KEY。尝试交互式登录或使用缓存的凭据。")
+                    # Try login without forcing relogin
+                    if wandb.login(): 
+                        logger.info("WandB 登录成功 (交互式或缓存)。")
+                    else:
+                        logger.warning("WandB 交互式登录或缓存凭据检查失败。")
+                        args.use_wandb = False # Disable wandb if login fails
+                else:
+                    logger.info("检测到 WANDB_API_KEY。跳过显式 wandb.login() 调用。")
+                # ---> END MODIFIED <---
+
+                # Check if login succeeded before proceeding (args.use_wandb might be False now)
+                if args.use_wandb:
+                    # Verify login status after potential attempt or skip
+                    if wandb.api.api_key:
+                         logger.info("确认 WandB 已通过 API 密钥或登录进行身份验证。")
+                    else:
+                        logger.warning("WandB 身份验证检查失败，即使尝试了登录。禁用 WandB。")
+                        args.use_wandb = False
+
+            except Exception as e:
+                logger.error(f"WandB 登录或检查时发生错误: {e}", exc_info=True)
+                args.use_wandb = False
+    except Exception as e:
+        print(f"导入或初始化WandB时发生错误: {e}")
+        import traceback
+        traceback.print_exc()
+        args.use_wandb = False
 
     # Parse camera resolutions
     wrist_width, wrist_height = map(int, args.wrist_resolution.split('x'))
@@ -356,12 +473,23 @@ def main():
         head_width, head_height = map(int, args.head_resolution.split('x'))
         head_resolution = (head_width, head_height)
 
+    # Initialize data logger
+    data_logger = DataLogger(
+        log_dir=args.log_dir, 
+        use_wandb=args.use_wandb, 
+        wandb_project=args.wandb_project, 
+        wandb_entity=args.wandb_entity, 
+        wandb_api_key=args.wandb_api_key
+    )
+
     logger_fibre = fibre.utils.Logger(verbose=True)
     follower_arm = fibre.find_any(serial_number=args.serial_number, logger=logger_fibre)
     follower_arm.robot.resting()
-    follower_arm.robot.move_j(0, -30, 90, 0, 70, 0)
-    joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
     follower_arm.robot.set_enable(True)
+    follower_arm.robot.move_j(0, -30, 90, 0, 70, 0)
+    # follower_arm.robot.move_j(0, 0, 90, 0, 0, 0)
+    joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
+    
     arm_controller = ArmAngle(None, follower_arm, joint_offset)
     
     # Start keyboard monitor
@@ -394,6 +522,14 @@ def main():
     control_rate = args.control_rate
     warm_up = args.warm_up
 
+    # 打印开始数据收集的提示信息
+    if args.use_wandb:
+        print("\n" + "=" * 80)
+        print(f"🚀 开始数据收集! 将采集 {inference_time_s} 秒数据，控制率 {control_rate}Hz")
+        print(f"📊 轨迹将实时上传到WandB进行可视化")
+        print(f"💡 提示: 记得在浏览器中打开WandB链接查看实时轨迹可视化")
+        print("=" * 80 + "\n")
+
     logger.info(f"Begin with {warm_up} warm-up steps...")
 
     # Combined loop for warm-up and inference
@@ -410,8 +546,7 @@ def main():
         gripper = follower_arm.robot.hand.angle
         current_state = follow_joints.tolist() + [gripper]
         
-        if not is_warmup:
-            print("current_state: ", current_state)
+        print("current_state: ", current_state)
 
         try:
             # Get images from video streams
@@ -430,7 +565,13 @@ def main():
             # Make prediction with both images (for both warm-up and inference)
             prediction, inference_time_ms = client.predict(image_wrist, image_head, state, args.task)
             logger.info(f"Prediction: {prediction}")
+            logger.info(f"Prediction type: {type(prediction)}")
+            logger.info(f"Current state: {current_state}")
             logger.info(f"Server inference time: {inference_time_ms:.2f}ms")
+            
+            # Save data to log folder (including prediction results)
+            if not is_warmup:
+                data_logger.save_data(image_wrist, image_head, state, prediction, inference_time_ms)
             
             # Only move arm if not in warm-up and it's enabled
             if not is_warmup and keyboard_monitor.enabled:
@@ -459,6 +600,9 @@ def main():
     if stream_head:
         stream_head.stop()
     client.close()
+
+    # Finalize data logger
+    data_logger.finalize()
 
 
 if __name__ == "__main__":

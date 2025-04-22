@@ -150,9 +150,9 @@ def find_all(path, serial_number,
             raise Exception("Invalid path spec \"{}\"".format(search_spec))
 
 
-def find_any(path="usb", serial_number=None,
+def find_any(path="usb", serial_number=None, logger=Logger(verbose=False), 
         search_cancellation_token=None, channel_termination_token=None,
-        timeout=None, logger=Logger(verbose=False), find_multiple=False):
+        timeout=None, find_multiple=False):
     """
     Blocks until the first matching Fibre node is connected and then returns that node
     """
