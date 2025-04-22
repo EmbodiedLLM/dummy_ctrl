@@ -370,19 +370,7 @@ class TrajectoryVisualizer:
         # Upload to WandB only if initialized
         if self.wandb_initialized:
             try:
-                # ---> REMOVED Trajectory_Plot PNG logging <---
-                # Create a lightweight image of the current trajectory for real-time updates
-                # fig_img = fig.to_image(format="png", width=800, height=600)
-                # 
-                # Log summary metrics and image
-                # wandb.log({
-                #    "Trajectory_Plot": wandb.Image(fig_img, caption=f"Trajectory with {len(self.positions)} points"),
-                #    "Number_of_Points": len(self.positions),
-                #    "Duration_seconds": (self.timestamps[-1] - self.timestamps[0])/1000 if len(self.timestamps) > 1 else 0,
-                # })
-                # ---> END REMOVED <---
-                
-                # Also add custom 3D point cloud to WandB (still useful)
+                # Only add custom 3D point cloud to WandB
                 self._log_3d_point_cloud()
                 
                 # Periodically remind the user about the visualization URL
@@ -665,38 +653,28 @@ class DataLogger:
                     # Create a step number for logging
                     step = len(self.state_data)
                     
-                    # Log joint states and other key metrics
+                    # Log only input joints and prediction joints (simplified for charts)
                     wandb_data = {
-                        # 关节角度
-                        "joint_1": state[0],
-                        "joint_2": state[1],
-                        "joint_3": state[2],
-                        "joint_4": state[3],
-                        "joint_5": state[4],
-                        "joint_6": state[5],
-                        "gripper": state[6] if len(state) > 6 else 0,
-                        "end_x": end_position[0],
-                        "end_y": end_position[1], 
-                        "end_z": end_position[2],
-                        "inference_time_ms": inference_time_ms if inference_time_ms else 0,
+                        # Input joints (renamed from joint_X to input_jointX)
+                        "input_joint1": state[0],
+                        "input_joint2": state[1],
+                        "input_joint3": state[2],
+                        "input_joint4": state[3],
+                        "input_joint5": state[4],
+                        "input_joint6": state[5],
+                        "input_gripper": state[6] if len(state) > 6 else 0,
                     }
                     
                     # Add prediction data if available
-                    if prediction is not None and pred_end_position is not None:
+                    if prediction is not None:
                         pred_data = {
-                            "pred_joint_1": prediction[0],
-                            "pred_joint_2": prediction[1],
-                            "pred_joint_3": prediction[2],
-                            "pred_joint_4": prediction[3],
-                            "pred_joint_5": prediction[4],
-                            "pred_joint_6": prediction[5],
+                            "pred_joint1": prediction[0],
+                            "pred_joint2": prediction[1],
+                            "pred_joint3": prediction[2],
+                            "pred_joint4": prediction[3],
+                            "pred_joint5": prediction[4],
+                            "pred_joint6": prediction[5],
                             "pred_gripper": prediction[6] if len(prediction) > 6 else 0,
-                            "pred_end_x": pred_end_position[0],
-                            "pred_end_y": pred_end_position[1],
-                            "pred_end_z": pred_end_position[2],
-                            "pred_error_x": abs(end_position[0] - pred_end_position[0]),
-                            "pred_error_y": abs(end_position[1] - pred_end_position[1]),
-                            "pred_error_z": abs(end_position[2] - pred_end_position[2]),
                         }
                         wandb_data.update(pred_data)
                     
@@ -719,7 +697,7 @@ class DataLogger:
                     # Log combined image if available
                     if combined_image_rgb is not None:
                         wandb_data["camera_views"] = wandb.Image(combined_image_rgb, caption="Wrist (left) & Head (right)")
-                    # ---> END MODIFIED <--- 
+                    # ---> END MODIFIED <---
 
                     # Log metrics and combined image (if available)
                     wandb.log(wandb_data)
@@ -730,6 +708,7 @@ class DataLogger:
                         fig = self.trajectory_visualizer.log_trajectory() # Now returns fig
                         # Log the interactive plot to media if figure was generated
                         if fig is not None:
+                            # Only log the interactive visualization, no additional metrics
                             wandb.log({"Trajectory_Interactive": wandb.Plotly(fig)})
                     
                     # 周期性地提醒用户可视化链接

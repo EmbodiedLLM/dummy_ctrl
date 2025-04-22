@@ -173,69 +173,6 @@ class KeyboardMonitor:
         if self.thread.is_alive():
             self.thread.join(timeout=1.0)
 
-class VideoStreamManager:
-    def __init__(self, stream_wrist, stream_head):
-        """
-        Initialize the video stream manager with wrist and head camera streams
-        
-        Args:
-            stream_wrist: VideoStream object for wrist camera
-            stream_head: VideoStream object for head camera (can be None)
-        """
-        self.stream_wrist = stream_wrist
-        self.stream_head = stream_head
-        self.wrist_frame = None
-        self.head_frame = None
-        self.running = True
-        self.update_thread = None
-        
-    def start(self):
-        """Start the video stream manager"""
-        self.running = True
-        self.update_thread = Thread(target=self.update_frames, daemon=True)
-        self.update_thread.start()
-        return self
-        
-    def update_frames(self):
-        """Update the latest frames from both cameras"""
-        while self.running:
-            # Get wrist frame
-            if self.stream_wrist:
-                frame = self.stream_wrist.read()
-                if frame is not None:
-                    # Convert BGR to RGB
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    self.wrist_frame = frame_rgb
-            
-            # Get head frame
-            if self.stream_head:
-                frame = self.stream_head.read()
-                if frame is not None:
-                    # Convert BGR to RGB
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    self.head_frame = frame_rgb
-            
-            # Sleep a small amount to avoid excessive CPU usage
-            time.sleep(0.01)
-    
-    def get_latest_wrist_frame(self):
-        """Return the latest wrist camera frame"""
-        return self.wrist_frame
-    
-    def get_latest_head_frame(self):
-        """Return the latest head camera frame"""
-        return self.head_frame
-    
-    def stop(self):
-        """Stop the video stream manager"""
-        self.running = False
-        if self.update_thread:
-            self.update_thread.join(timeout=1.0)
-        if self.stream_wrist:
-            self.stream_wrist.stop()
-        if self.stream_head:
-            self.stream_head.stop()
-
 class KeyboardMonitorWrapper:
     def __init__(self, robot):
         self.robot = robot
@@ -297,7 +234,8 @@ class ACTClient:
             self.stub = policy_pb2_grpc.PolicyServiceStub(self.channel)
         
         # 存储视频流和机器人
-        self.video_thread = VideoStreamManager(stream_wrist, stream_head)
+        self.stream_wrist = stream_wrist
+        self.stream_head = stream_head 
         self.robot = robot
         
         # 存储控制参数
@@ -359,88 +297,174 @@ class ACTClient:
             if image_wrist is None:
                 raise ValueError("Wrist camera image cannot be None")
             
-            # Ensure images are in the correct format (0-1 range floats or uint8)
+            # 打印原始图像信息，用于调试
+            logger.info(f"原始图像信息 - 形状: {image_wrist.shape}, 类型: {image_wrist.dtype}, 最小值: {np.min(image_wrist)}, 最大值: {np.max(image_wrist)}")
+            
+            # 确保手腕图像是三通道RGB格式
+            if len(image_wrist.shape) == 2:  # 灰度图像
+                # 确保使用COLOR_GRAY2RGB而不是BGR，因为模型期望RGB输入
+                image_wrist = cv2.cvtColor(image_wrist, cv2.COLOR_GRAY2RGB)
+                logger.warning(f"手腕相机图像是单通道的，已转换为三通道RGB: {image_wrist.shape}")
+            elif len(image_wrist.shape) == 3 and image_wrist.shape[2] == 1:  # 单通道图像，形状为(H, W, 1)
+                image_wrist = cv2.cvtColor(np.squeeze(image_wrist), cv2.COLOR_GRAY2RGB)
+                logger.warning(f"手腕相机图像是单通道的，已转换为三通道RGB: {image_wrist.shape}")
+            elif len(image_wrist.shape) == 3 and image_wrist.shape[2] == 4:  # RGBA图像
+                image_wrist = cv2.cvtColor(image_wrist, cv2.COLOR_RGBA2RGB)
+                logger.warning(f"手腕相机图像是四通道的，已转换为三通道RGB: {image_wrist.shape}")
+            elif len(image_wrist.shape) == 3 and image_wrist.shape[2] != 3:
+                # 不支持的通道数，创建空白三通道图像
+                logger.error(f"不支持的手腕相机图像通道数: {image_wrist.shape}，使用空白RGB图像")
+                image_wrist = np.zeros((image_wrist.shape[0], image_wrist.shape[1], 3), dtype=np.uint8)
+            
+            # 确保手腕图像是uint8格式，并在0-255范围内
             if image_wrist.dtype == np.float32 or image_wrist.dtype == np.float64:
                 if image_wrist.max() <= 1.0:
-                    # Convert to uint8 for JPEG encoding
+                    # 将0-1范围的浮点数转换为uint8 (0-255)
                     image_wrist = (image_wrist * 255).astype(np.uint8)
+                else:
+                    # 对于其他范围，先归一化到0-1，再转换到0-255
+                    min_val = np.min(image_wrist)
+                    max_val = np.max(image_wrist)
+                    if min_val != max_val:  # 避免除以零
+                        image_wrist = ((image_wrist - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                    else:
+                        image_wrist = np.zeros_like(image_wrist, dtype=np.uint8)
             
-            # Convert wrist camera image to JPEG bytes
-            success1, encoded_img1 = cv2.imencode('.jpg', image_wrist)
+            # 如果是其他整数类型，转换为标准uint8
+            if image_wrist.dtype != np.uint8:
+                image_wrist = image_wrist.astype(np.uint8)
+            
+            # 再次确认图像已经是RGB格式的三通道图像
+            assert len(image_wrist.shape) == 3 and image_wrist.shape[2] == 3, f"手腕图像必须是三通道RGB，但获得了: {image_wrist.shape}"
+            
+            # 为了JPEG编码，需要先将RGB转为BGR（OpenCV的要求）
+            image_wrist_bgr = cv2.cvtColor(image_wrist, cv2.COLOR_RGB2BGR)
+            
+            # 保存图像用于调试（可选）
+            # cv2.imwrite("debug_wrist_bgr.jpg", image_wrist_bgr)
+            
+            # 仅使用JPEG编码，与服务器端的解码逻辑匹配
+            # 使用较高的质量设置以确保图像细节保留
+            success1, encoded_img1 = cv2.imencode('.jpg', image_wrist_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
             if not success1:
                 raise ValueError("Failed to encode wrist camera image")
+            img_format = "jpeg"
             img_bytes1 = encoded_img1.tobytes()
             
-            # Get wrist image dimensions
+            # 获取图像尺寸
             img1_height, img1_width = image_wrist.shape[0], image_wrist.shape[1]
             
-            # Create request with encoded images
+            # 记录编码后的图像信息
+            logger.info(f"已编码手腕图像: 格式={img_format}, 大小={len(img_bytes1)/1024:.2f}KB, 尺寸={img1_width}x{img1_height}")
+            
+            # 创建请求与编码后的图像
             request = policy_pb2.PredictRequest(
-                encoded_image=img_bytes1,  # Primary image (wrist)
-                image_format="jpeg",
+                encoded_image=img_bytes1,  # 主图像（手腕）
+                image_format=img_format,
                 image_height=img1_height,
                 image_width=img1_width,
                 state=state
             )
             
-            # Add task if provided
+            # 添加任务描述（如果提供）
             if task:
                 request.task = task
                 logger.info(f"Added task: '{task}'")
             
-            # Add head camera image if provided
+            # 添加头部相机图像（如果提供）
             if image_head is not None:
-                # Ensure head image is in correct format
+                # 确保头部图像是三通道RGB格式
+                if len(image_head.shape) == 2:  # 灰度图像
+                    image_head = cv2.cvtColor(image_head, cv2.COLOR_GRAY2RGB)
+                    logger.warning(f"头部相机图像是单通道的，已转换为三通道RGB: {image_head.shape}")
+                elif len(image_head.shape) == 3 and image_head.shape[2] == 1:  # 单通道图像，形状为(H, W, 1)
+                    image_head = cv2.cvtColor(np.squeeze(image_head), cv2.COLOR_GRAY2RGB)
+                    logger.warning(f"头部相机图像是单通道的，已转换为三通道RGB: {image_head.shape}")
+                elif len(image_head.shape) == 3 and image_head.shape[2] == 4:  # RGBA图像
+                    image_head = cv2.cvtColor(image_head, cv2.COLOR_RGBA2RGB)
+                    logger.warning(f"头部相机图像是四通道的，已转换为三通道RGB: {image_head.shape}")
+                elif len(image_head.shape) == 3 and image_head.shape[2] != 3:
+                    # 不支持的通道数，创建空白三通道图像
+                    logger.error(f"不支持的头部相机图像通道数: {image_head.shape}，使用空白RGB图像")
+                    image_head = np.zeros((image_head.shape[0], image_head.shape[1], 3), dtype=np.uint8)
+                
+                # 确保头部图像是uint8格式
                 if image_head.dtype == np.float32 or image_head.dtype == np.float64:
                     if image_head.max() <= 1.0:
-                        # Convert to uint8 for JPEG encoding
+                        # 将0-1范围的浮点数转换为uint8
                         image_head = (image_head * 255).astype(np.uint8)
+                    else:
+                        # 对于其他范围，先归一化到0-1，再转换到0-255
+                        min_val = np.min(image_head)
+                        max_val = np.max(image_head)
+                        if min_val != max_val:  # 避免除以零
+                            image_head = ((image_head - min_val) / (max_val - min_val) * 255).astype(np.uint8)
+                        else:
+                            image_head = np.zeros_like(image_head, dtype=np.uint8)
                 
-                success2, encoded_img2 = cv2.imencode('.jpg', image_head)
+                # 如果是其他整数类型，转换为标准uint8
+                if image_head.dtype != np.uint8:
+                    image_head = image_head.astype(np.uint8)
+                
+                # 再次确认图像已经是RGB格式的三通道图像
+                assert len(image_head.shape) == 3 and image_head.shape[2] == 3, f"头部图像必须是三通道RGB，但获得了: {image_head.shape}"
+                
+                # 为了图像编码，需要先将RGB转为BGR（OpenCV的要求）
+                image_head_bgr = cv2.cvtColor(image_head, cv2.COLOR_RGB2BGR)
+                
+                # 保存图像用于调试（可选）
+                # cv2.imwrite("debug_head_bgr.jpg", image_head_bgr)
+                
+                # 仅使用JPEG编码，与服务器端的解码逻辑匹配
+                success2, encoded_img2 = cv2.imencode('.jpg', image_head_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
                 if not success2:
                     raise ValueError("Failed to encode head camera image")
                 img_bytes2 = encoded_img2.tobytes()
                 
-                # Get head image dimensions
+                # 获取头部图像尺寸
                 img2_height, img2_width = image_head.shape[0], image_head.shape[1]
                 
-                # Add to request
+                # 记录编码后的图像信息
+                logger.info(f"已编码头部图像: 格式={img_format}, 大小={len(img_bytes2)/1024:.2f}KB, 尺寸={img2_width}x{img2_height}")
+                
+                # 添加到请求
                 request.encoded_image2 = img_bytes2
                 request.image2_height = img2_height
                 request.image2_width = img2_width
                 
-                logger.info(f"Sending both camera images - Wrist: {img1_width}x{img1_height}, Head: {img2_width}x{img2_height}")
+                logger.info(f"发送两个相机图像 - 手腕: {img1_width}x{img1_height}, 头部: {img2_width}x{img2_height}, 格式: {img_format}")
             else:
-                logger.info(f"Sending only wrist camera image: {img1_width}x{img1_height}")
+                logger.info(f"仅发送手腕相机图像: {img1_width}x{img1_height}, 格式: {img_format}")
             
-            # Time the request
+            # 记录图像时间
             start_time = time.perf_counter()
             response = self.stub.Predict(request)
             end_time = time.perf_counter()
             
-            # Calculate round-trip time
+            # 计算往返时间
             rtt_ms = (end_time - start_time) * 1000
-            logger.info(f"Round-trip time: {rtt_ms:.2f}ms, Server inference time: {response.inference_time_ms:.2f}ms")
+            logger.info(f"往返时间: {rtt_ms:.2f}ms, 服务器推理时间: {response.inference_time_ms:.2f}ms")
             
-            # Log image sizes
+            # 记录图像大小
             wrist_size = len(img_bytes1) / 1024
-            logger.info(f"Sent wrist image size: {wrist_size:.2f}KB")
+            logger.info(f"已发送手腕图像大小: {wrist_size:.2f}KB")
             if image_head is not None:
                 head_size = len(img_bytes2) / 1024
-                logger.info(f"Sent head image size: {head_size:.2f}KB")
+                logger.info(f"已发送头部图像大小: {head_size:.2f}KB")
             
+            logger.info(f"服务器返回预测结果: {response.prediction}")
             return response.prediction, response.inference_time_ms
         
         except grpc.RpcError as e:
             if e.code() == grpc.StatusCode.UNAVAILABLE:
-                logger.error("Server unavailable, may need to reconnect")
+                logger.error("服务器不可用，可能需要重新连接")
             elif e.code() == grpc.StatusCode.DEADLINE_EXCEEDED:
-                logger.error("Prediction request timed out, server response too slow")
+                logger.error("预测请求超时，服务器响应太慢")
             else:
-                logger.error(f"Prediction request failed: {e.code()}: {e.details()}")
+                logger.error(f"预测请求失败: {e.code()}: {e.details()}")
             return [], 0.0
         except Exception as e:
-            logger.error(f"Error during prediction: {str(e)}")
+            logger.error(f"预测过程中出错: {str(e)}")
             return [], 0.0
     
     def close(self):
@@ -454,7 +478,7 @@ class ACTClient:
         try:
             # 健康检查已在main函数中执行，不需要再次执行
             # 仅确认视频流是否正常
-            if not self.video_thread.running:
+            if not self.stream_wrist:
                 logger.error("视频流未运行")
                 return False
                 
@@ -484,6 +508,23 @@ class ACTClient:
                     image_head = observation.get('head_rgb', None)
                     state = observation['state']
                     
+                    # 确保图像格式正确
+                    if image_wrist is None:
+                        logger.error(f"预热步骤 {i+1}/{self.warmup_steps} 失败：手腕图像为空")
+                        time.sleep(0.1)
+                        continue
+                    
+                    # 验证通道数
+                    if len(image_wrist.shape) != 3 or image_wrist.shape[2] != 3:
+                        logger.error(f"预热步骤 {i+1}/{self.warmup_steps} 失败：手腕图像通道数不正确，形状={image_wrist.shape}")
+                        
+                        # 保存调试图像
+                        self.save_debug_image(image_wrist, f"debug_wrist_error_{i}")
+                        
+                        # 创建一个替代的三通道RGB图像
+                        logger.info("创建替代RGB图像")
+                        image_wrist = np.zeros((480, 640, 3), dtype=np.uint8)
+                    
                     # 发送预测请求
                     prediction, inference_time = self.predict(
                         image_wrist=image_wrist,
@@ -497,6 +538,11 @@ class ACTClient:
                         logger.debug(f"预热步骤 {i+1}/{self.warmup_steps} 成功，推理时间: {inference_time:.1f}ms")
                     else:
                         logger.warning(f"预热步骤 {i+1}/{self.warmup_steps} 失败")
+                        
+                        # 保存调试图像
+                        self.save_debug_image(image_wrist, f"debug_wrist_failed_{i}")
+                        if image_head is not None:
+                            self.save_debug_image(image_head, f"debug_head_failed_{i}")
                     
                     # 小睡一下以避免服务器过载
                     time.sleep(0.05)
@@ -724,77 +770,121 @@ class ACTClient:
                 observation = {}
                 
                 # 获取手腕相机图像
-                wrist_frame = self.video_thread.get_latest_wrist_frame()
+                wrist_frame = self.stream_wrist.read()
                 if wrist_frame is None:
                     logger.warning(f"无法获取手腕相机图像 (尝试 {attempt+1}/{max_attempts})")
                     attempt += 1
                     time.sleep(0.1)  # Short delay before retry
                     continue
                 
-                # 确保图像是三通道RGB格式
-                # 首先检查图像的维度和通道数
-                logger.debug(f"原始手腕图像形状: {wrist_frame.shape}")
+                # 检查图像形状，确保它是3通道的
+                logger.debug(f"原始手腕图像形状: {wrist_frame.shape}, 类型: {wrist_frame.dtype}")
                 
-                if len(wrist_frame.shape) == 2:  # 灰度图像，只有高度和宽度
-                    # 将灰度图转换为3通道RGB图像
-                    wrist_frame_rgb = cv2.cvtColor(wrist_frame, cv2.COLOR_GRAY2RGB)
-                    logger.info(f"将灰度手腕图像转换为RGB，形状从 {wrist_frame.shape} 到 {wrist_frame_rgb.shape}")
-                elif len(wrist_frame.shape) == 3 and wrist_frame.shape[2] == 1:  # 单通道图像
-                    # 将单通道图像转换为3通道
-                    wrist_frame_rgb = cv2.cvtColor(wrist_frame, cv2.COLOR_GRAY2RGB)
-                    logger.info(f"将单通道手腕图像转换为RGB，形状从 {wrist_frame.shape} 到 {wrist_frame_rgb.shape}")
-                elif len(wrist_frame.shape) == 3 and wrist_frame.shape[2] == 3:  # BGR图像（OpenCV默认）
-                    # 将BGR转换为RGB
-                    wrist_frame_rgb = cv2.cvtColor(wrist_frame, cv2.COLOR_BGR2RGB)
-                elif len(wrist_frame.shape) == 3 and wrist_frame.shape[2] == 4:  # BGRA图像
-                    # 将BGRA转换为RGB
-                    wrist_frame_rgb = cv2.cvtColor(wrist_frame, cv2.COLOR_BGRA2RGB)
+                # 确保图像是3通道的
+                if len(wrist_frame.shape) == 2:  # 灰度图像
+                    # 直接转为RGB，而不是BGR
+                    wrist_frame = cv2.cvtColor(wrist_frame, cv2.COLOR_GRAY2RGB)
+                    logger.warning(f"手腕图像是单通道的，已转换为RGB: {wrist_frame.shape}")
+                elif len(wrist_frame.shape) == 3 and wrist_frame.shape[2] == 1:  # 单通道图像，形状为(H, W, 1)
+                    # 直接转为RGB，而不是BGR
+                    wrist_frame = cv2.cvtColor(np.squeeze(wrist_frame), cv2.COLOR_GRAY2RGB)
+                    logger.warning(f"手腕图像是单通道的，已转换为RGB: {wrist_frame.shape}")
+                elif len(wrist_frame.shape) == 3 and wrist_frame.shape[2] == 4:  # RGBA图像
+                    # 直接转为RGB，而不是BGR
+                    wrist_frame = cv2.cvtColor(wrist_frame, cv2.COLOR_RGBA2RGB)
+                    logger.warning(f"手腕图像是四通道的，已转换为RGB: {wrist_frame.shape}")
+                elif len(wrist_frame.shape) == 3 and wrist_frame.shape[2] == 3:
+                    # 如果是BGR（OpenCV默认），转为RGB
+                    wrist_frame = cv2.cvtColor(wrist_frame, cv2.COLOR_BGR2RGB)
+                    logger.debug("将BGR格式转换为RGB格式")
                 else:
-                    # 未知格式，尝试转换为RGB
-                    logger.warning(f"未知的图像格式: {wrist_frame.shape}，尝试强制转换")
-                    try:
-                        wrist_frame_rgb = cv2.cvtColor(wrist_frame, cv2.COLOR_BGR2RGB)
-                    except cv2.error:
-                        # 如果转换失败，创建一个空的RGB图像
-                        logger.error("图像格式转换失败，使用空图像")
-                        wrist_frame_rgb = np.zeros((480, 640, 3), dtype=np.uint8)
+                    # 不支持的通道数，创建空白三通道RGB图像
+                    logger.error(f"不支持的手腕图像通道数: {wrist_frame.shape}，创建空白RGB图像")
+                    wrist_frame = np.zeros((wrist_frame.shape[0], wrist_frame.shape[1], 3), dtype=np.uint8)
                 
-                # 记录处理后的图像尺寸和通道数
+                # 保存原始图像用于调试（可选）
+                # cv2.imwrite(f"debug_wrist_rgb_{attempt}.jpg", cv2.cvtColor(wrist_frame, cv2.COLOR_RGB2BGR))
+                
+                # 确保图像是uint8类型
+                if wrist_frame.dtype != np.uint8:
+                    logger.warning(f"手腕图像不是uint8类型，而是 {wrist_frame.dtype}，进行转换")
+                    if wrist_frame.dtype == np.float32 or wrist_frame.dtype == np.float64:
+                        if wrist_frame.max() <= 1.0:
+                            wrist_frame = (wrist_frame * 255).astype(np.uint8)
+                        else:
+                            wrist_frame = np.clip(wrist_frame, 0, 255).astype(np.uint8)
+                    else:
+                        wrist_frame = wrist_frame.astype(np.uint8)
+                
+                # 确保图像是三通道RGB
+                if len(wrist_frame.shape) != 3 or wrist_frame.shape[2] != 3:
+                    logger.error(f"无法确保手腕图像是3通道RGB，形状为 {wrist_frame.shape}，创建空白RGB图像")
+                    wrist_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                
+                wrist_frame_rgb = wrist_frame  # 已经确保是RGB格式
+                
+                # 检查处理后的图像
                 logger.info(f"处理后的手腕图像: 形状={wrist_frame_rgb.shape}, 类型={wrist_frame_rgb.dtype}, 通道数={wrist_frame_rgb.shape[2] if len(wrist_frame_rgb.shape) > 2 else 1}")
                 
                 observation['wrist_rgb'] = wrist_frame_rgb
                 
                 # 获取头部相机图像（如果可用）
-                if self.video_thread.has_head_camera:
-                    head_frame = self.video_thread.get_latest_head_frame()
+                head_frame_rgb = None
+                if self.stream_head is not None:
+                    head_frame = self.stream_head.read()
                     if head_frame is not None:
-                        # 同样确保头部图像是三通道RGB格式
-                        logger.debug(f"原始头部图像形状: {head_frame.shape}")
+                        # 检查头部图像形状，确保它是3通道的
+                        logger.debug(f"原始头部图像形状: {head_frame.shape}, 类型: {head_frame.dtype}")
                         
+                        # 确保图像是3通道的
                         if len(head_frame.shape) == 2:  # 灰度图像
-                            head_frame_rgb = cv2.cvtColor(head_frame, cv2.COLOR_GRAY2RGB)
-                            logger.info(f"将灰度头部图像转换为RGB，形状从 {head_frame.shape} 到 {head_frame_rgb.shape}")
-                        elif len(head_frame.shape) == 3 and head_frame.shape[2] == 1:  # 单通道图像
-                            head_frame_rgb = cv2.cvtColor(head_frame, cv2.COLOR_GRAY2RGB)
-                            logger.info(f"将单通道头部图像转换为RGB，形状从 {head_frame.shape} 到 {head_frame_rgb.shape}")
-                        elif len(head_frame.shape) == 3 and head_frame.shape[2] == 3:  # BGR图像
-                            head_frame_rgb = cv2.cvtColor(head_frame, cv2.COLOR_BGR2RGB)
-                        elif len(head_frame.shape) == 3 and head_frame.shape[2] == 4:  # BGRA图像
-                            head_frame_rgb = cv2.cvtColor(head_frame, cv2.COLOR_BGRA2RGB)
+                            # 直接转为RGB，而不是BGR
+                            head_frame = cv2.cvtColor(head_frame, cv2.COLOR_GRAY2RGB)
+                            logger.warning(f"头部图像是单通道的，已转换为RGB: {head_frame.shape}")
+                        elif len(head_frame.shape) == 3 and head_frame.shape[2] == 1:  # 单通道图像，形状为(H, W, 1)
+                            # 直接转为RGB，而不是BGR
+                            head_frame = cv2.cvtColor(np.squeeze(head_frame), cv2.COLOR_GRAY2RGB)
+                            logger.warning(f"头部图像是单通道的，已转换为RGB: {head_frame.shape}")
+                        elif len(head_frame.shape) == 3 and head_frame.shape[2] == 4:  # RGBA图像
+                            # 直接转为RGB，而不是BGR
+                            head_frame = cv2.cvtColor(head_frame, cv2.COLOR_RGBA2RGB)
+                            logger.warning(f"头部图像是四通道的，已转换为RGB: {head_frame.shape}")
+                        elif len(head_frame.shape) == 3 and head_frame.shape[2] == 3:
+                            # 如果是BGR（OpenCV默认），转为RGB
+                            head_frame = cv2.cvtColor(head_frame, cv2.COLOR_BGR2RGB)
+                            logger.debug("将BGR格式转换为RGB格式")
                         else:
-                            # 未知格式，尝试转换为RGB
-                            logger.warning(f"未知的头部图像格式: {head_frame.shape}，尝试强制转换")
-                            try:
-                                head_frame_rgb = cv2.cvtColor(head_frame, cv2.COLOR_BGR2RGB)
-                            except cv2.error:
-                                logger.error("头部图像格式转换失败，不使用头部图像")
-                                head_frame_rgb = None
+                            # 不支持的通道数，创建空白三通道RGB图像
+                            logger.error(f"不支持的头部图像通道数: {head_frame.shape}，创建空白RGB图像")
+                            head_frame = np.zeros((head_frame.shape[0], head_frame.shape[1], 3), dtype=np.uint8)
                         
-                        if head_frame_rgb is not None:
-                            logger.info(f"处理后的头部图像: 形状={head_frame_rgb.shape}, 类型={head_frame_rgb.dtype}, 通道数={head_frame_rgb.shape[2] if len(head_frame_rgb.shape) > 2 else 1}")
-                            observation['head_rgb'] = head_frame_rgb
+                        # 保存原始图像用于调试（可选）
+                        # cv2.imwrite(f"debug_head_rgb_{attempt}.jpg", cv2.cvtColor(head_frame, cv2.COLOR_RGB2BGR))
+                        
+                        # 确保图像是uint8类型
+                        if head_frame.dtype != np.uint8:
+                            logger.warning(f"头部图像不是uint8类型，而是 {head_frame.dtype}，进行转换")
+                            if head_frame.dtype == np.float32 or head_frame.dtype == np.float64:
+                                if head_frame.max() <= 1.0:
+                                    head_frame = (head_frame * 255).astype(np.uint8)
+                                else:
+                                    head_frame = np.clip(head_frame, 0, 255).astype(np.uint8)
+                            else:
+                                head_frame = head_frame.astype(np.uint8)
+                        
+                        # 确保图像是三通道RGB
+                        if len(head_frame.shape) != 3 or head_frame.shape[2] != 3:
+                            logger.error(f"无法确保头部图像是3通道RGB，形状为 {head_frame.shape}，跳过使用头部图像")
+                            observation['head_rgb'] = None
+                            continue
+                        
+                        head_frame_rgb = head_frame  # 已经确保是RGB格式
+                        
+                        # 检查处理后的图像
+                        logger.info(f"处理后的头部图像: 形状={head_frame_rgb.shape}, 类型={head_frame_rgb.dtype}, 通道数={head_frame_rgb.shape[2] if len(head_frame_rgb.shape) > 2 else 1}")
+                        
+                        observation['head_rgb'] = head_frame_rgb
                 else:
-                    # 如果没有头部摄像头，使用零向量
                     observation['head_rgb'] = None
                 
                 # 获取机器人状态
@@ -865,6 +955,35 @@ class ACTClient:
             logger.error(f"健康检查错误: {e}")
             return False
 
+    def save_debug_image(self, image, name_prefix):
+        """保存调试图像"""
+        try:
+            if image is None:
+                logger.warning(f"无法保存调试图像 {name_prefix}：图像为空")
+                return
+                
+            # 确保debug目录存在
+            debug_dir = "debug_images"
+            os.makedirs(debug_dir, exist_ok=True)
+            
+            # 生成唯一的文件名
+            timestamp = int(time.time())
+            filename = f"{debug_dir}/{name_prefix}_{timestamp}.jpg"
+            
+            # 如果是RGB格式，转为BGR再保存
+            if len(image.shape) == 3 and image.shape[2] == 3:
+                image_to_save = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            else:
+                # 其他格式直接保存
+                image_to_save = image
+                
+            # 保存图像
+            cv2.imwrite(filename, image_to_save)
+            logger.info(f"保存调试图像到 {filename}")
+            
+        except Exception as e:
+            logger.error(f"保存调试图像失败: {e}")
+
 def get_observation_from_streams(stream_wrist, stream_head, state_data):
     """从两个视频流和状态数据获取观察数据"""
     # 尝试读取手腕摄像头数据
@@ -903,9 +1022,9 @@ def get_observation_from_streams(stream_wrist, stream_head, state_data):
 
 def main():
     parser = argparse.ArgumentParser(description="ACT Policy Client")
-    parser.add_argument("--server", default="localhost:50051", help="Server address")
+    parser.add_argument("--server", default="localhost:50052", help="Server address")
     parser.add_argument("--serial_number", default="396636713233", help="Serial number of the follower arm")
-    parser.add_argument("--camera_wrist", default="http://192.168.237.249:8080/?action=stream", help="Wrist camera URL")
+    parser.add_argument("--camera_wrist", default="http://192.168.237.100:8080/?action=stream", help="Wrist camera URL")
     parser.add_argument("--camera_head", default="http://192.168.237.157:8080/?action=stream", help="Head camera URL (optional)")
     parser.add_argument("--wrist_resolution", default="1280x720", help="Wrist camera resolution (WxH)")
     parser.add_argument("--head_resolution", default="1280x720", help="Head camera resolution (WxH)")
@@ -1022,9 +1141,6 @@ def main():
     # Wait for streams to start
     time.sleep(2.0)
     
-    # Initialize video stream manager
-    video_manager = VideoStreamManager(stream_wrist, stream_head).start()
-    
     # Create ACT client
     client = ACTClient(
         server_address=args.server, 
@@ -1046,17 +1162,6 @@ def main():
     model_info = client.get_model_info()
     logger.info(f"Model info: {model_info}")
     
-    # Reset server state
-    # reset_status = client.reset()
-    # logger.info(f"Reset status: {reset_status}")
-    
-    # Set parameters
-    # inference_time_s = args.inference_time_s # These are now handled within ACTClient init
-    # control_rate = args.control_rate
-    # warm_up = args.warm_up
-
-    # logger.info(f"Begin with {warm_up} warm-up steps...") # Logging handled inside run()
-
     # Start the main client run loop, passing the data logger
     run_successful = client.run(data_logger=data_logger)
 
@@ -1064,7 +1169,10 @@ def main():
     logger.info("Inference complete, cleaning up...")
     if keyboard_monitor:
         keyboard_monitor.stop()
-    video_manager.stop()
+    if stream_wrist:
+        stream_wrist.stop()
+    if stream_head:
+        stream_head.stop()
     client.close()
     
     # Return to rest position

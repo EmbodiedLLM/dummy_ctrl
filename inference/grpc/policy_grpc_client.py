@@ -354,7 +354,7 @@ def main():
     parser = argparse.ArgumentParser(description="Policy gRPC Client")
     parser.add_argument("--server", default="localhost:50051", help="Server address")
     parser.add_argument("--serial_number", default="396636713233", help="Serial number of the follower arm")
-    parser.add_argument("--camera_wrist", default="http://192.168.237.249:8080/?action=stream", help="Wrist camera URL")
+    parser.add_argument("--camera_wrist", default="http://192.168.237.100:8080/?action=stream", help="Wrist camera URL")
     parser.add_argument("--camera_head", default="http://192.168.237.157:8080/?action=stream", help="Head camera URL (optional)")
     parser.add_argument("--wrist_resolution", default="1280x720", help="Wrist camera resolution (WxH)")
     parser.add_argument("--head_resolution", default="1280x720", help="Head camera resolution (WxH)")
