@@ -14,39 +14,37 @@ from lerobot.common.robot_devices.cameras.utils import make_cameras_from_configs
 from lerobot.common.robot_devices.motors.configs import DummyMotorsBusConfig
 from lerobot.common.robot_devices.motors.utils import make_motors_buses_from_configs
 from lerobot.common.robot_devices.robots.configs import DummyRobotConfig
-from lerobot.common.robot_devices.teleop.gamepad import TeachFollowArmController
+from lerobot.common.robot_devices.teleop.dummy_ctrl import TeachFollowArmController
 from lerobot.common.robot_devices.utils import RobotDeviceAlreadyConnectedError, RobotDeviceNotConnectedError
 import torch
 
 class DummyRobot:
     """
-    Dummy机械臂机器人类
     """
 
     def __init__(self, config: DummyRobotConfig):
         self.config = config
         self.robot_type = "dummy"
         self.inference_time = self.config.inference_time
-        self.mock = self.config.mock
         self.control_mode = "joint"  # 控制模式: "joint" 或 "eef"，默认使用末端控制
 
-        # 初始化电机
-        if hasattr(self.config, "leader_arm"):
-            self.leader_arm = make_motors_buses_from_configs(self.config.leader_arm)
+        if hasattr(self.config, "leader_arms"):
+            self.leader_motor = make_motors_buses_from_configs(self.config.leader_arms)
+            self.leader_arm = self.leader_motor['main']
         else:
             self.leader_arm = None
 
-        if hasattr(self.config, "follower_arm"):
-            self.follower_arm = make_motors_buses_from_configs(self.config.follower_arm)
+        if hasattr(self.config, "follower_arms"):
+            self.follower_motor = make_motors_buses_from_configs(self.config.follower_arms)
+            self.follower_arm = self.follower_motor['main']
         else:
             self.follower_arm = None
 
-        # 初始化摄像头
         self.cameras = make_cameras_from_configs(self.config.cameras)
         self.observation_space = {}
         
         if not self.inference_time:
-            self.teleop = TeachFollowArmController()
+            self.teleop = TeachFollowArmController(self.leader_arm, self.follower_arm)
         else:
             self.teleop = None
         
@@ -88,21 +86,7 @@ class DummyRobot:
     @property
     def num_cameras(self):
         return len(self.cameras)   
-     
-        # 遥控控制器（如果不是推理模式）
-        if not self.inference_time:
-            self.arm_controller = SixAxisArmController()
-            # 设置示教臂和跟随臂，启用teach-follow模式
-            if self.leader_arm and self.follower_arm:
-                self.arm_controller.set_arms(self.leader_arm, self.follower_arm)
-                print("启用示教-跟随模式")
-        else:
-            self.arm_controller = None
-            
-        # 保存初始夹爪位置
-        self.teach_hand_init_angle = 0.0
-        self.follow_hand_init_angle = 0.0
-
+    
     def connect(self) -> bool:
         """
         连接机械臂和摄像头
@@ -111,26 +95,6 @@ class DummyRobot:
             raise RobotDeviceAlreadyConnectedError(
                 "Piper is already connected. Do not run `robot.connect()` twice."
             )
-        # success = True
-
-        # # 连接机械臂
-        # if self.leader_arm:
-        #     for arm in self.leader_arm.values():
-        #         success = success and arm.connect(True)
-        #         if hasattr(arm, 'teach_hand_init_angle'):
-        #             self.teach_hand_init_angle = arm.teach_hand_init_angle
-
-        # if self.follower_arm:
-        #     for arm in self.follower_arm.values():
-        #         success = success and arm.connect(True)
-        #         if hasattr(arm, 'follow_hand_init_angle'):
-        #             self.follow_hand_init_angle = arm.follow_hand_init_angle
-
-        # # 连接摄像头
-        # for camera in self.cameras.values():
-        #     success = success and camera.connect()
-
-        # return success
 
         self.leader_arm.connect(enable=True)
         self.follower_arm.connect(enable=True)
@@ -139,24 +103,23 @@ class DummyRobot:
             self.cameras[name].connect()
             self.is_connected = self.is_connected and self.cameras[name].is_connected
             print(f"camera {name} conneted")
-        
+
+        self.is_connected = True
 
     def run_calibration(self) -> Dict:
         """
-        运行校准程序
         """
         return {}
 
     def teleop_step(self, record_data=False) -> Dict:
         """
-        遥控控制步骤
         """
+
         if not self.is_connected:
             raise ConnectionError()
         if self.inference_time:
-            # 在推理模式下，不需要遥控器
             return {}
-        
+        self.leader_arm.enable_false()
         # read target pose state as
         before_read_t = time.perf_counter()
         state = self.follower_arm.read()
@@ -165,7 +128,7 @@ class DummyRobot:
 
         # do action
         before_write_t = time.perf_counter()
-        target_joints = list(action.values)
+        target_joints = list(action.values())
         self.follower_arm.write(target_joints)
         self.logs["write_pos_dt_s"] = time.perf_counter() - before_write_t
 
@@ -173,7 +136,7 @@ class DummyRobot:
             return
 
         state = torch.as_tensor(list(state.values()), dtype=torch.float32)
-        action = torch.as_tensor(list(action.valus()), dtype=torch.float32)
+        action = torch.as_tensor(list(action.values()), dtype=torch.float32)
 
         images = {}
         for name in self.cameras:
@@ -253,19 +216,19 @@ class DummyRobot:
         """
         断开连接
         """
-        # 断开机械臂连接
-        if self.leader_arm:
-            for arm in self.leader_arm.values():
-                arm.safe_disconnect()
+        # # 断开机械臂连接
+        # if self.leader_arm:
+        #     for arm in self.leader_arm.values():
+        #         arm.safe_disconnect()
 
-        if self.follower_arm:
-            for arm in self.follower_arm.values():
-                arm.safe_disconnect()
+        # if self.follower_arm:
+        #     for arm in self.follower_arm.values():
+        #         arm.safe_disconnect()
 
-        # 断开摄像头连接
-        for camera in self.cameras.values():
-            camera.disconnect()
+        # # 断开摄像头连接
+        # for camera in self.cameras.values():
+        #     camera.disconnect()
             
         # 停止遥控器
-        if self.arm_controller:
-            self.arm_controller.stop() 
+        # if self.arm_controller:
+        #     self.arm_controller.stop() 

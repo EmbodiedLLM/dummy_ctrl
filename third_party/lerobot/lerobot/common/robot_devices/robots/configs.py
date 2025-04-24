@@ -651,10 +651,10 @@ class DummyRobotConfig(RobotConfig):
     """
     inference_time: bool
     
-    leader_arm: dict[str, MotorsBusConfig] = field(
+    leader_arms: dict[str, MotorsBusConfig] = field(
         default_factory=lambda: {
             "main": DummyMotorsBusConfig(
-                port="/dev/tty.usbmodem208C318752531",  # 示例，实际应该替换为真实的序列号
+                port="208C31875253",  # 示例，实际应该替换为真实的序列号
                 motors={
                     # name: (index, model)
                     "joint_1": [1, "sts3215"],
@@ -669,10 +669,10 @@ class DummyRobotConfig(RobotConfig):
         }
     ) 
 
-    follower_arm: dict[str, MotorsBusConfig] = field(
+    follower_arms: dict[str, MotorsBusConfig] = field(
         default_factory=lambda: {
             "main": DummyMotorsBusConfig(
-                port="/dev/tty.usbmodem3966367132331",  # 示例，实际应该替换为真实的序列号
+                port="396636713233",  # 示例，实际应该替换为真实的序列号
                 motors={
                     # name: (index, model)
                     "joint_1": [1, "sts3215"],

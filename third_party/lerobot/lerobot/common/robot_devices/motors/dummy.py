@@ -11,46 +11,40 @@ class DummyMotorsBus:
     """
     def __init__(self, 
                  config: DummyMotorsBusConfig):
-        self.port = config.port
-        self.motors = config.motors
-        self.init_joint_position = [0.0, -30.0, 90.0, 0.0, 70.0, 0.0, 0.0]  # [6 joints + 1 gripper] * 0.0
-        self.safe_disable_position = [0.0, -30.0, 90.0, 0.0, 70.0, 0.0, 0.0]  # 安全位置
+        self.config = config
+        self.port = self.config.port
+        self.motors = self.config.motors
+        self.init_joint_position = [0.0, -30.0, 90.0, 0.0, 70.0, 0.0]  # [
+        self.safe_disable_position = [0.0, -30.0, 90.0, 0.0, 70.0, 0.0]  # 安全位置
         self.current_position = self.safe_disable_position.copy()
         self.joint_offset = np.array([0.0, -73.0, 180.0, 0.0, 0.0, 0.0])
         
         # 模拟连接状态
         self.is_connected = False
-        self.mock = config.mock
         
-        # 初始化夹爪位置
-        self.teach_hand_init_angle = 0.0
-        self.follow_hand_init_angle = 0.0
-        
-        if not self.mock:
-            try:
-                # 导入fibre库
-                import fibre.utils
-                import fibre
-                # 导入logger
-                logger = fibre.utils.Logger(verbose=True)
-                # 连接机械臂
-                self.arm = fibre.find_any(serial_number=self.port, logger=logger)
-                print(f"Connected to arm with serial: {self.port}")
-                self.is_connected = True
-                
-                # 记录初始夹爪位置
-                if hasattr(self.arm.robot, "hand") and hasattr(self.arm.robot.hand, "angle"):
-                    if self.port == "208C318752531":  # 示教臂
-                        self.teach_hand_init_angle = self.arm.robot.hand.angle
-                    else:  # 跟随臂
-                        self.follow_hand_init_angle = self.arm.robot.hand.angle
-                
-            except Exception as e:
-                print(f"Failed to connect to arm: {e}")
-                self.is_connected = False
-        else:
-            print("Running in mock mode")
+        try:
+            # 导入fibre库
+            import fibre.utils
+            import fibre
+            # 导入logger
+            logger = fibre.utils.Logger(verbose=True)
+            # 连接机械臂
+            self.arm = fibre.find_any(serial_number=self.port, logger=logger)
+            print(f"Connected to arm with serial: {self.port}")
             self.is_connected = True
+            
+            # 记录初始夹爪位置
+            # if hasattr(self.arm.robot, "hand") and hasattr(self.arm.robot.hand, "angle"):
+            #     if self.port == "208C31875253":  # 示教臂
+            #         print("1111111111")
+            self.teach_hand_init_angle = -179.03
+                # else:  # 跟随臂
+                #     print("222222222")
+            self.follow_hand_init_angle = -128.99
+            
+        except Exception as e:
+            print(f"Failed to connect to arm: {e}")
+            self.is_connected = False
 
     @property
     def motor_names(self) -> list[str]:
@@ -68,28 +62,29 @@ class DummyMotorsBus:
         """
         使能机械臂并检测使能状态
         """
-        if self.mock:
-            self.is_connected = enable
-            return True
         
         try:
-            if enable:
+            # if enable:
                 # 使能机械臂
-                self.arm.robot.set_enable(True)
-                # 移动到安全位置
-                self.arm.robot.move_j(*self.safe_disable_position[:-1])  # 不包括夹爪
-                print(f"Enabling arm {self.port}")
-            else:
-                # 关闭使能
-                self.arm.robot.set_enable(False)
-                print(f"Disabling arm {self.port}")
+            self.arm.robot.set_enable(enable)
+            # 移动到安全位置
+            # self.arm.robot.move_j(*self.safe_disable_position)  # 不包括夹爪
+            self.arm.robot.resting()
+            print(f"Enabling arm {self.port}")
+            # else:
+            #     # 关闭使能
+            #     self.arm.robot.set_enable(False)
+            #     print(f"Disabling arm {self.port}")
             
             self.is_connected = enable
             return True
         except Exception as e:
             print(f"Failed to {'enable' if enable else 'disable'} arm: {e}")
             return False
-            
+    
+    def enable_false(self):
+        self.arm.robot.set_enable(False)
+        
     def set_calibration(self):
         # 设置校准参数
         return
@@ -109,41 +104,33 @@ class DummyMotorsBus:
         关节控制
         - target_joint: 弧度制，[joint_1, joint_2, ..., joint_6, gripper]
         """
-        if self.mock:
-            # 在mock模式下只更新当前位置
-            self.current_position = target_joint.copy()
-            return
+        # try:
+        print("101010101010")
+        print(target_joint)
+        # 移动机械臂关节
+        self.arm.robot.move_j(
+            target_joint[0],
+            target_joint[1], 
+            target_joint[2], 
+            target_joint[3], 
+            target_joint[4], 
+            target_joint[5]
+        )
+        # 控制夹爪
+        if len(target_joint) > 6:
+            self.arm.robot.hand.set_angle(target_joint[6] - self.teach_hand_init_angle + self.follow_hand_init_angle)
         
-        try:
-            # 移动机械臂关节
-            self.arm.robot.move_j(
-                target_joint[0],
-                target_joint[1], 
-                target_joint[2], 
-                target_joint[3], 
-                target_joint[4], 
-                target_joint[5]
-            )
-            
-            # 控制夹爪
-            if len(target_joint) > 6:
-                self.arm.robot.hand.set_angle(target_joint[6])
-            
-            # 更新当前位置
-            self.current_position = target_joint.copy()
-        except Exception as e:
-            print(f"Failed to move joints: {e}")
+        # 更新当前位置
+        self.current_position = target_joint.copy()
+        # except Exception as e:
+        #     print(f"Failed to move joints: {e}")
 
     def write_eef(self, target_eef: list):
         """
         末端控制
         - target_eef: [x, y, z, rx, ry, rz]，单位为mm和度
         """
-        if self.mock:
-            # 在mock模式下只记录命令
-            print(f"Moving to EEF position: {target_eef}")
-            return
-        
+
         try:
             # 末端控制
             self.arm.robot.move_l(
@@ -154,6 +141,7 @@ class DummyMotorsBus:
                 target_eef[4],
                 target_eef[5]
             )
+            self.arm.robot.hand.set_angle(target_eef[6] - self.teach_hand_init_angle + self.follow_hand_init_angle)
             print(f"Moving to EEF position: {target_eef}")
         except Exception as e:
             print(f"Failed to move to EEF position: {e}")
@@ -163,61 +151,35 @@ class DummyMotorsBus:
         读取当前关节角度和夹爪状态
         返回值包含关节和夹爪的当前角度
         """
-        if self.mock:
-            # 在mock模式下返回当前记录的位置
-            return {
-                "joint_1": self.current_position[0],
-                "joint_2": self.current_position[1],
-                "joint_3": self.current_position[2],
-                "joint_4": self.current_position[3],
-                "joint_5": self.current_position[4],
-                "joint_6": self.current_position[5],
-                "gripper": self.current_position[6],
-            }
+        # 读取当前关节角度
+        current_angles = self.get_current_joints()
+        gripper_angle = self.arm.robot.hand.angle
         
-        try:
-            # 读取当前关节角度
-            current_angles = self.get_current_joints()
-            gripper_angle = self.arm.robot.hand.angle
-            
-            # 更新当前位置
-            self.current_position = [
-                current_angles[0],
-                current_angles[1],
-                current_angles[2],
-                current_angles[3],
-                current_angles[4],
-                current_angles[5],
-                gripper_angle
-            ]
-            
-            return {
-                "joint_1": current_angles[0],
-                "joint_2": current_angles[1],
-                "joint_3": current_angles[2],
-                "joint_4": current_angles[3],
-                "joint_5": current_angles[4],
-                "joint_6": current_angles[5],
-                "gripper": gripper_angle,
-            }
-        except Exception as e:
-            print(f"Failed to read joint positions: {e}")
-            return {
-                "joint_1": 0.0,
-                "joint_2": -30.0,
-                "joint_3": 90.0,
-                "joint_4": 0.0,
-                "joint_5": 70.0,
-                "joint_6": 0.0,
-                "gripper": 0.0,
-            }
+        # 更新当前位置
+        self.current_position = [
+            current_angles[0],
+            current_angles[1],
+            current_angles[2],
+            current_angles[3],
+            current_angles[4],
+            current_angles[5],
+            gripper_angle
+        ]
+        
+        return {
+            "joint_1": current_angles[0],
+            "joint_2": current_angles[1],
+            "joint_3": current_angles[2],
+            "joint_4": current_angles[3],
+            "joint_5": current_angles[4],
+            "joint_6": current_angles[5],
+            "gripper": gripper_angle,
+        }
     
     def get_current_joints(self) -> list:
         """
         获取当前关节角度
         """
-        if self.mock:
-            return self.current_position[:6]
         try:
             # 读取当前关节角度，根据fibre库API调整
             return np.array([
@@ -226,7 +188,7 @@ class DummyMotorsBus:
             self.arm.robot.joint_3.angle,
             self.arm.robot.joint_4.angle,
             self.arm.robot.joint_5.angle,
-            self.arm.robot.joint_6.angle
+            self.arm.robot.joint_6.angle,
         ])+ self.joint_offset
         except Exception as e:
             print(f"Failed to get current joints: {e}")
@@ -237,16 +199,6 @@ class DummyMotorsBus:
         读取当前末端位置
         返回值包含末端位置和姿态，单位为mm和度
         """
-        if self.mock:
-            # 在mock模式下返回模拟数据
-            return {
-                "x": 200.0,
-                "y": 0.0,
-                "z": 300.0,
-                "rx": 0.0,
-                "ry": 0.0,
-                "rz": 0.0,
-            }
         
         try:
             # 读取当前末端位置
@@ -259,6 +211,7 @@ class DummyMotorsBus:
                 "rx": current_pose[3],
                 "ry": current_pose[4],
                 "rz": current_pose[5],
+                "gripper": current_pose[6],
             }
         except Exception as e:
             print(f"Failed to read EEF position: {e}")
@@ -275,8 +228,6 @@ class DummyMotorsBus:
         """
         获取当前末端位置
         """
-        if self.mock:
-            return [200.0, 0.0, 300.0, 0.0, 0.0, 0.0]
         
         try:
             # 读取当前末端位置，根据fibre库API调整
@@ -286,7 +237,8 @@ class DummyMotorsBus:
                 self.arm.robot.eef_pose.z, 
                 self.arm.robot.eef_pose.a, 
                 self.arm.robot.eef_pose.b, 
-                self.arm.robot.eef_pose.c
+                self.arm.robot.eef_pose.c, 
+                self.arm.robot.hand.angle,
             ]
         except Exception as e:
             print(f"Failed to get current pose: {e}")

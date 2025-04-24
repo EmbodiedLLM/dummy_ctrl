@@ -37,6 +37,6 @@ class PiperMotorsBusConfig(MotorsBusConfig):
 @MotorsBusConfig.register_subclass("dummy")
 @dataclass
 class DummyMotorsBusConfig(MotorsBusConfig):
-    port: str  # 使用设备序列号作为端口标识
+    port: str  
     motors: dict[str, tuple[int, str]]
     mock: bool = False
