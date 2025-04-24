@@ -1,17 +1,3 @@
-# Copyright 2024 The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import abc
 from dataclasses import dataclass, field
 from typing import Sequence
@@ -27,7 +13,8 @@ from lerobot.common.robot_devices.motors.configs import (
     DynamixelMotorsBusConfig,
     FeetechMotorsBusConfig,
     MotorsBusConfig,
-    DummyMotorsBusConfig,
+    PiperMotorsBusConfig,
+    DummyMotorsBusConfig
 )
 
 
@@ -613,24 +600,70 @@ class LeKiwiRobotConfig(RobotConfig):
 
     mock: bool = False
 
+
+@RobotConfig.register_subclass("piper")
+@dataclass
+class PiperRobotConfig(RobotConfig):
+    inference_time: bool
+    
+    follower_arm: dict[str, MotorsBusConfig] = field(
+        default_factory=lambda: {
+            "main": PiperMotorsBusConfig(
+                can_name="can0",
+                motors={
+                    # name: (index, model)
+                    "joint_1": [1, "agilex_piper"],
+                    "joint_2": [2, "agilex_piper"],
+                    "joint_3": [3, "agilex_piper"],
+                    "joint_4": [4, "agilex_piper"],
+                    "joint_5": [5, "agilex_piper"],
+                    "joint_6": [6, "agilex_piper"],
+                    "gripper": (7, "agilex_piper"),
+                },
+            ),
+        }
+    )
+
+    cameras: dict[str, CameraConfig] = field(
+        default_factory=lambda: {
+            "one": OpenCVCameraConfig(
+                camera_index=0,
+                fps=30,
+                width=640,
+                height=480,
+            ),
+            "two": OpenCVCameraConfig(
+                camera_index=2,
+                fps=30,
+                width=640,
+                height=480,
+            ),
+        }
+    )
+
+
 @RobotConfig.register_subclass("dummy")
 @dataclass
 class DummyRobotConfig(RobotConfig):
+    """
+    Dummy机械臂配置类
+    基于fibre连接的机械臂，通过serial_number连接
+    """
     inference_time: bool
     
     leader_arm: dict[str, MotorsBusConfig] = field(
         default_factory=lambda: {
             "main": DummyMotorsBusConfig(
-                port="/dev/tty.usbmodem208C31875253",
+                port="/dev/tty.usbmodem208C318752531",  # 示例，实际应该替换为真实的序列号
                 motors={
                     # name: (index, model)
-                    "joint_1": [1, "dummy"],
-                    "joint_2": [2, "dummy"],
-                    "joint_3": [3, "dummy"],
-                    "joint_4": [4, "dummy"],
-                    "joint_5": [5, "dummy"],
-                    "joint_6": [6, "dummy"],
-                    "gripper": (7, "dummy"),
+                    "joint_1": [1, "sts3215"],
+                    "joint_2": [2, "sts3215"],
+                    "joint_3": [3, "sts3215"],
+                    "joint_4": [4, "sts3215"],
+                    "joint_5": [5, "sts3215"],
+                    "joint_6": [6, "sts3215"],
+                    "gripper": [7, "sts3215"],
                 },
             ),
         }
@@ -639,16 +672,16 @@ class DummyRobotConfig(RobotConfig):
     follower_arm: dict[str, MotorsBusConfig] = field(
         default_factory=lambda: {
             "main": DummyMotorsBusConfig(
-                port="/dev/tty.usbmodem396636713233",
+                port="/dev/tty.usbmodem3966367132331",  # 示例，实际应该替换为真实的序列号
                 motors={
                     # name: (index, model)
-                    "joint_1": [1, "dummy"],
-                    "joint_2": [2, "dummy"],
-                    "joint_3": [3, "dummy"],
-                    "joint_4": [4, "dummy"],
-                    "joint_5": [5, "dummy"],
-                    "joint_6": [6, "dummy"],
-                    "gripper": (7, "dummy"),
+                    "joint_1": [1, "sts3215"],
+                    "joint_2": [2, "sts3215"],
+                    "joint_3": [3, "sts3215"],
+                    "joint_4": [4, "sts3215"],
+                    "joint_5": [5, "sts3215"],
+                    "joint_6": [6, "sts3215"],
+                    "gripper": [7, "sts3215"],
                 },
             ),
         }
@@ -657,14 +690,14 @@ class DummyRobotConfig(RobotConfig):
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
             "cam_wrist": OpenCVCameraConfig(
-                camera_index=0,
-                fps=10,
+                camera_index="http://192.168.65.124:8080/?action=stream",  # 使用IP摄像头URL
+                fps=30,
                 width=1280,
                 height=720,
             ),
             "cam_head": OpenCVCameraConfig(
-                camera_index=1,
-                fps=10,
+                camera_index="http://192.168.65.138:8080/?action=stream",  # 使用IP摄像头URL
+                fps=30,
                 width=1280,
                 height=720,
             ),

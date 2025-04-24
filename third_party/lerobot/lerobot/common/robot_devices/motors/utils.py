@@ -1,24 +1,11 @@
-# Copyright 2024 The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 from typing import Protocol
 
 from lerobot.common.robot_devices.motors.configs import (
     DynamixelMotorsBusConfig,
     FeetechMotorsBusConfig,
-    MotorsBusConfig,
-    DummyMotorsBusConfig,ummyMotorsBusConfig,
+    PiperMotorsBusConfig,
+    DummyMotorsBusConfig,
+    MotorsBusConfig
 )
 
 
@@ -44,11 +31,12 @@ def make_motors_buses_from_configs(motors_bus_configs: dict[str, MotorsBusConfig
             from lerobot.common.robot_devices.motors.feetech import FeetechMotorsBus
 
             motors_buses[key] = FeetechMotorsBus(cfg)
-
+            
         elif cfg.type == "dummy":
             from lerobot.common.robot_devices.motors.dummy import DummyMotorsBus
 
             motors_buses[key] = DummyMotorsBus(cfg)
+
         else:
             raise ValueError(f"The motor type '{cfg.type}' is not valid.")
 
@@ -67,7 +55,8 @@ def make_motors_bus(motor_type: str, **kwargs) -> MotorsBus:
 
         config = FeetechMotorsBusConfig(**kwargs)
         return FeetechMotorsBus(config)
-    
+
+        
     elif motor_type == "dummy":
         from lerobot.common.robot_devices.motors.dummy import DummyMotorsBus
 
@@ -76,3 +65,6 @@ def make_motors_bus(motor_type: str, **kwargs) -> MotorsBus:
 
     else:
         raise ValueError(f"The motor type '{motor_type}' is not valid.")
+
+def get_motor_names(arm: dict[str, MotorsBus]) -> list:
+        return [f"{arm}_{motor}" for arm, bus in arm.items() for motor in bus.motors]

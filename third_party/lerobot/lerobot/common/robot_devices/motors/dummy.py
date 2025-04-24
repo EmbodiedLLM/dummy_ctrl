@@ -1,29 +1,57 @@
 import time
 from typing import Dict
 import numpy as np
-import fibre
-from single_arm.arm_angle import ArmAngle
-# from piper_sdk import *
+
 from lerobot.common.robot_devices.motors.configs import DummyMotorsBusConfig
 
 class DummyMotorsBus:
     """
-        对Piper SDK的二次封装
+    Dummy机械臂电机控制接口
+    基于fibre库的接口进行封装，适配LeRobot框架
     """
     def __init__(self, 
                  config: DummyMotorsBusConfig):
+        self.port = config.port
         self.motors = config.motors
-        # self.init_joint_position = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] # [6 joints + 1 gripper] * 0.0
-        # self.safe_disable_position = [0.0, 0.0, 0.0, 0.0, 0.52, 0.0, 0.0]
-        # self.pose_factor = 1000 # 单位 0.001mm
-        # self.joint_factor = 57324.840764 # 1000*180/3.14， rad -> 度（单位0.001度）
-        self.joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
-        self.logger = fibre.utils.Logger(verbose=True)
-        self.teach_arm = fibre.find_any(serial_number="208C31875253", logger=self.logger)
-        self.follow_arm = fibre.find_any(serial_number="396636713233", logger=self.logger)
-        self.arm_controller = ArmAngle(self.teach_arm, self.follow_arm, self.joint_offset)
-        self.teach_hand_init_angle = self.teach_arm.robot.hand.angle
-        self.follow_hand_init_angle = self.follow_arm.robot.hand.angle
+        self.init_joint_position = [0.0, -30.0, 90.0, 0.0, 70.0, 0.0, 0.0]  # [6 joints + 1 gripper] * 0.0
+        self.safe_disable_position = [0.0, -30.0, 90.0, 0.0, 70.0, 0.0, 0.0]  # 安全位置
+        self.current_position = self.safe_disable_position.copy()
+        self.joint_offset = np.array([0.0, -73.0, 180.0, 0.0, 0.0, 0.0])
+        
+        # 模拟连接状态
+        self.is_connected = False
+        self.mock = config.mock
+        
+        # 初始化夹爪位置
+        self.teach_hand_init_angle = 0.0
+        self.follow_hand_init_angle = 0.0
+        
+        if not self.mock:
+            try:
+                # 导入fibre库
+                import fibre.utils
+                import fibre
+                # 导入logger
+                logger = fibre.utils.Logger(verbose=True)
+                # 连接机械臂
+                self.arm = fibre.find_any(serial_number=self.port, logger=logger)
+                print(f"Connected to arm with serial: {self.port}")
+                self.is_connected = True
+                
+                # 记录初始夹爪位置
+                if hasattr(self.arm.robot, "hand") and hasattr(self.arm.robot.hand, "angle"):
+                    if self.port == "208C318752531":  # 示教臂
+                        self.teach_hand_init_angle = self.arm.robot.hand.angle
+                    else:  # 跟随臂
+                        self.follow_hand_init_angle = self.arm.robot.hand.angle
+                
+            except Exception as e:
+                print(f"Failed to connect to arm: {e}")
+                self.is_connected = False
+        else:
+            print("Running in mock mode")
+            self.is_connected = True
+
     @property
     def motor_names(self) -> list[str]:
         return list(self.motors.keys())
@@ -36,151 +64,238 @@ class DummyMotorsBus:
     def motor_indices(self) -> list[int]:
         return [idx for idx, _ in self.motors.values()]
 
-
-    def connect(self, enable:bool) -> bool:
-        '''
-            使能机械臂并检测使能状态,尝试5s,如果使能超时则退出程序
-        '''
-        # enable_flag = False
-        # loop_flag = False
-        # # 设置超时时间（秒）
-        # timeout = 5
-        # # 记录进入循环前的时间
-        # start_time = time.time()
-        # while not (loop_flag):
-        #     elapsed_time = time.time() - start_time
-        #     print(f"--------------------")
-        #     enable_list = []
-        #     enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_1.foc_status.driver_enable_status)
-        #     enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_2.foc_status.driver_enable_status)
-        #     enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_3.foc_status.driver_enable_status)
-        #     enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_4.foc_status.driver_enable_status)
-        #     enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_5.foc_status.driver_enable_status)
-        #     enable_list.append(self.piper.GetArmLowSpdInfoMsgs().motor_6.foc_status.driver_enable_status)
-        #     if(enable):
-        #         enable_flag = all(enable_list)
-        #         self.piper.EnableArm(7)
-        #         self.piper.GripperCtrl(0,1000,0x01, 0)
-        #     else:
-        #         # move to safe disconnect position
-        #         enable_flag = any(enable_list)
-        #         self.piper.DisableArm(7)
-        #         self.piper.GripperCtrl(0,1000,0x02, 0)
-        #     print(f"使能状态: {enable_flag}")
-        #     print(f"--------------------")
-        #     if(enable_flag == enable):
-        #         loop_flag = True
-        #         enable_flag = True
-        #     else: 
-        #         loop_flag = False
-        #         enable_flag = False
-        #     # 检查是否超过超时时间
-        #     if elapsed_time > timeout:
-        #         print(f"超时....")
-        #         enable_flag = False
-        #         loop_flag = True
-        #         break
-        #     time.sleep(0.5)
-        # resp = enable_flag
-        # print(f"Returning response: {resp}")
-        # return resp
-        # logger = fibre.utils.Logger(verbose=True)
-        # teach_arm = fibre.find_any(serial_number="208C31875253", logger=logger)
-        # follow_arm = fibre.find_any(serial_number="396636713233", logger=logger)
-        # joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
-        self.teach_arm.robot.set_enable(True)
-        self.follow_arm.robot.set_enable(True)
-        self.logger.info("Moving Teach Arm to Working Pose")
-        self.logger.info("Moving Lead Arm to Working Pose")
-        self.teach_arm.robot.move_j(0, -30, 90, 0, 70, 0)
-        self.follow_arm.robot.move_j(0, -30, 90, 0, 70, 0)
-        self.teach_arm.robot.hand.set_mode(0)
-        self.teach_arm.robot.hand.set_torque(0)
-        self.follow_arm.robot.hand.set_mode(2)
-        self.logger.info(f"Teach Gripper mode: {self.teach_arm.robot.hand.get_mode()}, Follow Gripper mode: {self.follow_arm.robot.hand.get_mode()}")
-        self.logger.info(f"Teach Gripper angle: {self.teach_arm.robot.hand.angle}, Follow Gripper angle: {self.follow_arm.robot.hand.angle}")
+    def connect(self, enable: bool) -> bool:
+        """
+        使能机械臂并检测使能状态
+        """
+        if self.mock:
+            self.is_connected = enable
+            return True
         
-        # self.teach_arm.robot.set_enable(False)
-
-    def motor_names(self):
-        return
-
+        try:
+            if enable:
+                # 使能机械臂
+                self.arm.robot.set_enable(True)
+                # 移动到安全位置
+                self.arm.robot.move_j(*self.safe_disable_position[:-1])  # 不包括夹爪
+                print(f"Enabling arm {self.port}")
+            else:
+                # 关闭使能
+                self.arm.robot.set_enable(False)
+                print(f"Disabling arm {self.port}")
+            
+            self.is_connected = enable
+            return True
+        except Exception as e:
+            print(f"Failed to {'enable' if enable else 'disable'} arm: {e}")
+            return False
+            
     def set_calibration(self):
+        # 设置校准参数
         return
     
     def revert_calibration(self):
+        # 恢复默认校准参数
         return
 
     def apply_calibration(self):
         """
-            移动到初始位置
+        移动到初始位置
         """
-        self.teach_arm.robot.resting()
-        self.follow_arm.robot.resting()
+        self.write(target_joint=self.init_joint_position)
 
-    def write(self, target_joint:list):
-        # """
-        #     Joint control
-        #     - target joint: in radians
-        #         joint_1 (float): 关节1角度 (-92000~92000) / 57324.840764
-        #         joint_2 (float): 关节2角度 -1300 ~ 90000 / 57324.840764
-        #         joint_3 (float): 关节3角度 2400 ~ -80000 / 57324.840764
-        #         joint_4 (float): 关节4角度 -90000~90000 / 57324.840764
-        #         joint_5 (float): 关节5角度 19000~-77000 / 57324.840764
-        #         joint_6 (float): 关节6角度 -90000~90000 / 57324.840764
-        #         gripper_range: 夹爪角度 0~0.08
-        # """
-        # joint_0 = round(target_joint[0]*self.joint_factor)
-        # joint_1 = round(target_joint[1]*self.joint_factor)
-        # joint_2 = round(target_joint[2]*self.joint_factor)
-        # joint_3 = round(target_joint[3]*self.joint_factor)
-        # joint_4 = round(target_joint[4]*self.joint_factor)
-        # joint_5 = round(target_joint[5]*self.joint_factor)
-        # gripper_range = round(target_joint[6]*1000*1000)
+    def write(self, target_joint: list):
+        """
+        关节控制
+        - target_joint: 弧度制，[joint_1, joint_2, ..., joint_6, gripper]
+        """
+        if self.mock:
+            # 在mock模式下只更新当前位置
+            self.current_position = target_joint.copy()
+            return
+        
+        try:
+            # 移动机械臂关节
+            self.arm.robot.move_j(
+                target_joint[0],
+                target_joint[1], 
+                target_joint[2], 
+                target_joint[3], 
+                target_joint[4], 
+                target_joint[5]
+            )
+            
+            # 控制夹爪
+            if len(target_joint) > 6:
+                self.arm.robot.hand.set_angle(target_joint[6])
+            
+            # 更新当前位置
+            self.current_position = target_joint.copy()
+        except Exception as e:
+            print(f"Failed to move joints: {e}")
 
-        # self.piper.MotionCtrl_2(0x01, 0x01, 100, 0x00) # joint control
-        # self.piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
-        # self.piper.GripperCtrl(abs(gripper_range), 1000, 0x01, 0) # 单位 0.001°
-
-        joint_0 = round(target_joint[0],3)
-        joint_1 = round(target_joint[1],3)
-        joint_2 = round(target_joint[2],3)
-        joint_3 = round(target_joint[3],3)
-        joint_4 = round(target_joint[4],3)
-        joint_5 = round(target_joint[5],3)  
-        gripper_range = round(target_joint[6],3)
-
-        self.teach_arm.robot.move_j(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
-        self.follow_arm.robot.move_j(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
-        self.teach_arm.robot.hand.set_angle(gripper_range)
-        self.follow_arm.robot.hand.set_angle(self.teach_arm.robot.hand.angle - self.teach_hand_init_angle + self.follow_hand_init_angle)
-    
+    def write_eef(self, target_eef: list):
+        """
+        末端控制
+        - target_eef: [x, y, z, rx, ry, rz]，单位为mm和度
+        """
+        if self.mock:
+            # 在mock模式下只记录命令
+            print(f"Moving to EEF position: {target_eef}")
+            return
+        
+        try:
+            # 末端控制
+            self.arm.robot.move_l(
+                target_eef[0],
+                target_eef[1],
+                target_eef[2],
+                target_eef[3],
+                target_eef[4],
+                target_eef[5]
+            )
+            print(f"Moving to EEF position: {target_eef}")
+        except Exception as e:
+            print(f"Failed to move to EEF position: {e}")
 
     def read(self) -> Dict:
         """
-            - 机械臂关节消息,单位0.001度
-            - 机械臂夹爪消息
+        读取当前关节角度和夹爪状态
+        返回值包含关节和夹爪的当前角度
         """
-        # joint_msg = self.piper.GetArmJointMsgs()
-        # joint_state = joint_msg.joint_state
-
-        # gripper_msg = self.piper.GetArmGripperMsgs()
-        # gripper_state = gripper_msg.gripper_state
-        teach_joints = self.arm_controller.get_teach_joints()
-        follow_joints = self.arm_controller.get_follow_joints()
+        if self.mock:
+            # 在mock模式下返回当前记录的位置
+            return {
+                "joint_1": self.current_position[0],
+                "joint_2": self.current_position[1],
+                "joint_3": self.current_position[2],
+                "joint_4": self.current_position[3],
+                "joint_5": self.current_position[4],
+                "joint_6": self.current_position[5],
+                "gripper": self.current_position[6],
+            }
         
-        return {
-            "joint_1": follow_joints[0],
-            "joint_2": follow_joints[1],
-            "joint_3": follow_joints[2],
-            "joint_4": follow_joints[3],
-            "joint_5": follow_joints[4],
-            "joint_6": follow_joints[5],
-            "gripper": follow_joints[6]
-        }
+        try:
+            # 读取当前关节角度
+            current_angles = self.get_current_joints()
+            gripper_angle = self.arm.robot.hand.angle
+            
+            # 更新当前位置
+            self.current_position = [
+                current_angles[0],
+                current_angles[1],
+                current_angles[2],
+                current_angles[3],
+                current_angles[4],
+                current_angles[5],
+                gripper_angle
+            ]
+            
+            return {
+                "joint_1": current_angles[0],
+                "joint_2": current_angles[1],
+                "joint_3": current_angles[2],
+                "joint_4": current_angles[3],
+                "joint_5": current_angles[4],
+                "joint_6": current_angles[5],
+                "gripper": gripper_angle,
+            }
+        except Exception as e:
+            print(f"Failed to read joint positions: {e}")
+            return {
+                "joint_1": 0.0,
+                "joint_2": -30.0,
+                "joint_3": 90.0,
+                "joint_4": 0.0,
+                "joint_5": 70.0,
+                "joint_6": 0.0,
+                "gripper": 0.0,
+            }
+    
+    def get_current_joints(self) -> list:
+        """
+        获取当前关节角度
+        """
+        if self.mock:
+            return self.current_position[:6]
+        try:
+            # 读取当前关节角度，根据fibre库API调整
+            return np.array([
+            self.arm.robot.joint_1.angle,
+            self.arm.robot.joint_2.angle,
+            self.arm.robot.joint_3.angle,
+            self.arm.robot.joint_4.angle,
+            self.arm.robot.joint_5.angle,
+            self.arm.robot.joint_6.angle
+        ])+ self.joint_offset
+        except Exception as e:
+            print(f"Failed to get current joints: {e}")
+            return self.current_position[:6]
+    
+    def read_eef(self) -> Dict:
+        """
+        读取当前末端位置
+        返回值包含末端位置和姿态，单位为mm和度
+        """
+        if self.mock:
+            # 在mock模式下返回模拟数据
+            return {
+                "x": 200.0,
+                "y": 0.0,
+                "z": 300.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "rz": 0.0,
+            }
+        
+        try:
+            # 读取当前末端位置
+            current_pose = self.get_current_pose()
+            
+            return {
+                "x": current_pose[0],
+                "y": current_pose[1],
+                "z": current_pose[2],
+                "rx": current_pose[3],
+                "ry": current_pose[4],
+                "rz": current_pose[5],
+            }
+        except Exception as e:
+            print(f"Failed to read EEF position: {e}")
+            return {
+                "x": 200.0,
+                "y": 0.0,
+                "z": 300.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "rz": 0.0,
+            }
+    
+    def get_current_pose(self) -> list:
+        """
+        获取当前末端位置
+        """
+        if self.mock:
+            return [200.0, 0.0, 300.0, 0.0, 0.0, 0.0]
+        
+        try:
+            # 读取当前末端位置，根据fibre库API调整
+            return [
+                self.arm.robot.eef_pose.x, 
+                self.arm.robot.eef_pose.y, 
+                self.arm.robot.eef_pose.z, 
+                self.arm.robot.eef_pose.a, 
+                self.arm.robot.eef_pose.b, 
+                self.arm.robot.eef_pose.c
+            ]
+        except Exception as e:
+            print(f"Failed to get current pose: {e}")
+            return [200.0, 0.0, 300.0, 0.0, 0.0, 0.0]
     
     def safe_disconnect(self):
-        """ 
-            Move to safe disconnect position
+        """
+        安全断开连接，先移动到安全位置再断开
         """
         self.write(target_joint=self.safe_disable_position)
+        time.sleep(1)  # 等待移动完成
+        self.connect(False) 
