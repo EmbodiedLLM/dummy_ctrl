@@ -181,7 +181,7 @@ class LeRobotDataCollector:
         
         logger.info(f"Started episode {self.episode_count}")
         
-    def collect_step(self, teach_joints, follow_joints, teach_gripper, follow_gripper):
+    def collect_step(self, teach, follow, teach_gripper, follow_gripper):
         """Collect one timestep of data"""
         if self.start_time is None:
             self.start_episode()
@@ -252,10 +252,10 @@ class LeRobotDataCollector:
         
         # Store state and action data
         self.current_episode_data["observation.state"].append(
-            np.concatenate([follow_joints, [float(follow_gripper)]]).tolist()
+            np.concatenate([follow, [float(follow_gripper)]]).tolist()
         )
         self.current_episode_data["action"].append(
-            np.concatenate([teach_joints, [float(teach_gripper)]]).tolist()
+            np.concatenate([teach, [float(teach_gripper)]]).tolist()
         )
         self.current_episode_data["episode_index"].append(self.episode_count)
         self.current_episode_data["frame_index"].append(self.frame_count)

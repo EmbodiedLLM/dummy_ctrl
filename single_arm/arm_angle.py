@@ -35,4 +35,16 @@ class ArmAngle:
             self.follow_arm.robot.joint_6.angle
         ])+ self.joint_offset
         return follow_joints
+    
+    def get_teach_current_pose(self):
+        self.teach_arm.robot.eef_pose.update_pose_6D()
+        x,y,z,rz,ry,rx = self.teach_arm.robot.eef_pose.x, self.teach_arm.robot.eef_pose.y, self.teach_arm.robot.eef_pose.z, self.teach_arm.robot.eef_pose.a, self.teach_arm.robot.eef_pose.b, self.teach_arm.robot.eef_pose.c
+        current_pose = np.array([x,y,z,rz,ry,rx])
+        return current_pose
+    
+    def get_follow_current_pose(self):
+        self.follow_arm.robot.eef_pose.update_pose_6D()
+        x,y,z,rz,ry,rx = self.follow_arm.robot.eef_pose.x, self.follow_arm.robot.eef_pose.y, self.follow_arm.robot.eef_pose.z, self.follow_arm.robot.eef_pose.a, self.follow_arm.robot.eef_pose.b, self.follow_arm.robot.eef_pose.c
+        current_pose = np.array([x,y,z,rz,ry,rx])
+        return current_pose
         

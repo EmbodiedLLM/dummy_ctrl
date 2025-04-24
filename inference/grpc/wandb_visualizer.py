@@ -592,7 +592,29 @@ class DataLogger:
             wrist_img_rgb = img_uint8 # Keep RGB for potential wandb logging
             wrist_img_bgr = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR)
             wrist_img_path = self.wrist_image_folder / f"{timestamp}.jpg"
-            cv2.imwrite(str(wrist_img_path), wrist_img_bgr)
+            
+            # Compress image to ensure size is below 100KB
+            compression_quality = 90  # Initial quality setting (0-100, higher is better quality but larger size)
+            max_size_kb = 100  # Target maximum size in KB
+            
+            # First attempt at saving with initial quality
+            cv2.imwrite(str(wrist_img_path), wrist_img_bgr, [cv2.IMWRITE_JPEG_QUALITY, compression_quality])
+            
+            # Check file size and reduce quality if needed
+            while wrist_img_path.stat().st_size > max_size_kb * 1024 and compression_quality > 10:
+                compression_quality -= 10
+                cv2.imwrite(str(wrist_img_path), wrist_img_bgr, [cv2.IMWRITE_JPEG_QUALITY, compression_quality])
+            
+            # If still too large, try resizing the image
+            if wrist_img_path.stat().st_size > max_size_kb * 1024:
+                # Calculate how much to scale down
+                scale_factor = math.sqrt(max_size_kb * 1024 / wrist_img_path.stat().st_size) * 0.9  # 10% safety margin
+                new_width = int(wrist_img_bgr.shape[1] * scale_factor)
+                new_height = int(wrist_img_bgr.shape[0] * scale_factor)
+                
+                # Resize and save again
+                resized_img = cv2.resize(wrist_img_bgr, (new_width, new_height), interpolation=cv2.INTER_AREA)
+                cv2.imwrite(str(wrist_img_path), resized_img, [cv2.IMWRITE_JPEG_QUALITY, compression_quality])
         
         # Prepare head image (convert to BGR for saving with cv2)
         head_img_bgr = None
@@ -603,7 +625,29 @@ class DataLogger:
             head_img_rgb = img_uint8 # Keep RGB for potential wandb logging
             head_img_bgr = cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR)
             head_img_path = self.head_image_folder / f"{timestamp}.jpg"
-            cv2.imwrite(str(head_img_path), head_img_bgr)
+            
+            # Compress image to ensure size is below 100KB
+            compression_quality = 90  # Initial quality setting
+            max_size_kb = 100  # Target maximum size in KB
+            
+            # First attempt at saving with initial quality
+            cv2.imwrite(str(head_img_path), head_img_bgr, [cv2.IMWRITE_JPEG_QUALITY, compression_quality])
+            
+            # Check file size and reduce quality if needed
+            while head_img_path.stat().st_size > max_size_kb * 1024 and compression_quality > 10:
+                compression_quality -= 10
+                cv2.imwrite(str(head_img_path), head_img_bgr, [cv2.IMWRITE_JPEG_QUALITY, compression_quality])
+            
+            # If still too large, try resizing the image
+            if head_img_path.stat().st_size > max_size_kb * 1024:
+                # Calculate how much to scale down
+                scale_factor = math.sqrt(max_size_kb * 1024 / head_img_path.stat().st_size) * 0.9  # 10% safety margin
+                new_width = int(head_img_bgr.shape[1] * scale_factor)
+                new_height = int(head_img_bgr.shape[0] * scale_factor)
+                
+                # Resize and save again
+                resized_img = cv2.resize(head_img_bgr, (new_width, new_height), interpolation=cv2.INTER_AREA)
+                cv2.imwrite(str(head_img_path), resized_img, [cv2.IMWRITE_JPEG_QUALITY, compression_quality])
         
         # Calculate end effector position from state
         end_position = self.forward_kinematics(state)
@@ -695,8 +739,8 @@ class DataLogger:
                          combined_image_rgb = wrist_img_rgb # Only wrist image available
                     
                     # Log combined image if available
-                    if combined_image_rgb is not None:
-                        wandb_data["camera_views"] = wandb.Image(combined_image_rgb, caption="Wrist (left) & Head (right)")
+                    # if combined_image_rgb is not None:
+                    #     wandb_data["camera_views"] = wandb.Image(combined_image_rgb, caption="Wrist (left) & Head (right)")
                     # ---> END MODIFIED <---
 
                     # Log metrics and combined image (if available)
