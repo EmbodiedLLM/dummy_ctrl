@@ -690,13 +690,13 @@ class DummyRobotConfig(RobotConfig):
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
             "cam_wrist": OpenCVCameraConfig(
-                camera_index="http://192.168.65.124:8080/?action=stream",  # 使用IP摄像头URL
+                url="http://192.168.65.124:8080/?action=stream",  # 使用IP摄像头URL
                 fps=30,
                 width=1280,
                 height=720,
             ),
             "cam_head": OpenCVCameraConfig(
-                camera_index="http://192.168.65.138:8080/?action=stream",  # 使用IP摄像头URL
+                url="http://192.168.65.138:8080/?action=stream",  # 使用IP摄像头URL
                 fps=30,
                 width=1280,
                 height=720,

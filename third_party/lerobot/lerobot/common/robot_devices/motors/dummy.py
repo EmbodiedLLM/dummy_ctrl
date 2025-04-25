@@ -64,19 +64,12 @@ class DummyMotorsBus:
         """
         
         try:
-            # if enable:
-                # 使能机械臂
             self.arm.robot.set_enable(enable)
             # 移动到安全位置
             # self.arm.robot.move_j(*self.safe_disable_position)  # 不包括夹爪
             self.arm.robot.resting()
             print(f"Enabling arm {self.port}")
-            # else:
-            #     # 关闭使能
-            #     self.arm.robot.set_enable(False)
-            #     print(f"Disabling arm {self.port}")
             
-            self.is_connected = enable
             return True
         except Exception as e:
             print(f"Failed to {'enable' if enable else 'disable'} arm: {e}")
