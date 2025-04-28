@@ -62,7 +62,6 @@ class DummyMotorsBus:
         """
         使能机械臂并检测使能状态
         """
-        
         try:
             self.arm.robot.set_enable(enable)
             # 移动到安全位置
