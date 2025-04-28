@@ -51,13 +51,13 @@ def push_dataset_to_hub(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--data-dir",
+        "--data_dir",
         type=Path,
         required=True,
         help="Directory containing your dataset"
     )
     parser.add_argument(
-        "--repo-id",
+        "--repo_id",
         type=str,
         required=True,
         help="HuggingFace repo ID (e.g. 'username/dataset-name')"
