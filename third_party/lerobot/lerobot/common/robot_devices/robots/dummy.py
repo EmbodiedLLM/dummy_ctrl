@@ -12,7 +12,7 @@ from PIL import Image
 from lerobot.common.robot_devices.cameras.configs import CameraConfig
 from lerobot.common.robot_devices.cameras.utils import make_cameras_from_configs
 from lerobot.common.robot_devices.motors.configs import DummyMotorsBusConfig
-from lerobot.common.robot_devices.motors.utils import make_motors_buses_from_configs
+from lerobot.common.robot_devices.motors.utils import make_motors_buses_from_configs, get_motor_names
 from lerobot.common.robot_devices.robots.configs import DummyRobotConfig
 from lerobot.common.robot_devices.teleop.dummy_ctrl import TeachFollowArmController
 from lerobot.common.robot_devices.utils import RobotDeviceAlreadyConnectedError, RobotDeviceNotConnectedError
@@ -64,12 +64,12 @@ class DummyRobot:
         return cam_ft
     @property
     def motor_features(self) -> dict:
-        action_names = self.get_motor_names(self.leader_arms)
-        state_names = self.get_motor_names(self.leader_arms)  
+        action_names = get_motor_names(self.leader_motor)
+        state_names = get_motor_names(self.follower_motor)  
         return {
             "action": {
                 "dtype": "float32",
-                "shape": (len(action_names),),
+                "shape": (7,),
                 "names": action_names,
             },
             "observation.state": {
@@ -96,8 +96,8 @@ class DummyRobot:
                 "Piper is already connected. Do not run `robot.connect()` twice."
             )
 
-        self.leader_arm.connect(enable=True)
-        self.follower_arm.connect(enable=True)
+        self.leader_arm.leader_connect(enable=True)
+        self.follower_arm.follower_connect(enable=True)
 
         for name in self.cameras:
             self.cameras[name].connect()
@@ -119,6 +119,9 @@ class DummyRobot:
             raise ConnectionError()
         if self.inference_time:
             return {}
+        
+        # read target pose state as
+        time.sleep(3)  # Wait for 3 seconds
         self.leader_arm.enable_false()
         # read target pose state as
         before_read_t = time.perf_counter()

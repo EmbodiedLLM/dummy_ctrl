@@ -19,7 +19,7 @@ data_collector = LeRobotDataCollector(
     output_dir="/Users/jack/lab_intern/dummy_ctrl/data/pick_place_0414",
     fps=10,
     camera_urls={
-        "cam_wrist": "http://192.168.237.249:8080/?action=stream",
+        "cam_wrist": "http://192.168.237.100:8080/?action=stream",
         "cam_head": "http://192.168.237.157:8080/?action=stream"
     },
     robot_type="thu_arm",
@@ -116,7 +116,8 @@ while not stop:
     follow_joints = arm_controller.get_follow_joints()
     follow_hand = follow_arm.robot.hand.angle
     teach_hand = follow_hand
-    
+    print(teach_arm.robot.hand.angle)
+    print(follow_arm.robot.hand.angle)
     # Step 2: Collect data (robot state + camera frames)
     data_collector.collect_step(
         teach=teach_joints,

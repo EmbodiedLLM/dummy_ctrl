@@ -14,8 +14,8 @@ class DummyMotorsBus:
         self.config = config
         self.port = self.config.port
         self.motors = self.config.motors
-        self.init_joint_position = [0.0, -30.0, 90.0, 0.0, 70.0, 0.0]  # [
-        self.safe_disable_position = [0.0, -30.0, 90.0, 0.0, 70.0, 0.0]  # 安全位置
+        self.init_joint_position = [0.0, -20.0, 90.0, 0.0, 70.0, 0.0]  # [
+        self.safe_disable_position = [0.0, -20.0, 90.0, 0.0, 70.0, 0.0]  # 安全位置
         self.current_position = self.safe_disable_position.copy()
         self.joint_offset = np.array([0.0, -73.0, 180.0, 0.0, 0.0, 0.0])
         
@@ -58,7 +58,7 @@ class DummyMotorsBus:
     def motor_indices(self) -> list[int]:
         return [idx for idx, _ in self.motors.values()]
 
-    def connect(self, enable: bool) -> bool:
+    def leader_connect(self, enable: bool) -> bool:
         """
         使能机械臂并检测使能状态
         """
@@ -66,8 +66,29 @@ class DummyMotorsBus:
         try:
             self.arm.robot.set_enable(enable)
             # 移动到安全位置
-            # self.arm.robot.move_j(*self.safe_disable_position)  # 不包括夹爪
             self.arm.robot.resting()
+            self.arm.robot.move_j(*self.safe_disable_position)  
+            self.arm.robot.hand.set_mode(0)
+            self.arm.robot.hand.set_torque(0)
+            print(f"Enabling arm {self.port}")
+            
+            return True
+        except Exception as e:
+            print(f"Failed to {'enable' if enable else 'disable'} arm: {e}")
+            return False
+
+    def follower_connect(self, enable: bool) -> bool:
+        """
+        使能机械臂并检测使能状态
+        """
+        
+        try:
+            self.arm.robot.set_enable(enable)
+
+            self.arm.robot.resting()
+            self.arm.robot.move_j(*self.safe_disable_position)
+            self.arm.robot.hand.set_mode(0)
+            self.arm.robot.hand.set_torque(0)
             print(f"Enabling arm {self.port}")
             
             return True
@@ -79,16 +100,13 @@ class DummyMotorsBus:
         self.arm.robot.set_enable(False)
         
     def set_calibration(self):
-        # 设置校准参数
         return
     
     def revert_calibration(self):
-        # 恢复默认校准参数
         return
 
     def apply_calibration(self):
         """
-        移动到初始位置
         """
         self.write(target_joint=self.init_joint_position)
 
@@ -98,8 +116,6 @@ class DummyMotorsBus:
         - target_joint: 弧度制，[joint_1, joint_2, ..., joint_6, gripper]
         """
         # try:
-        print("101010101010")
-        print(target_joint)
         # 移动机械臂关节
         self.arm.robot.move_j(
             target_joint[0],

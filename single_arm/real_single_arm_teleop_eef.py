@@ -19,8 +19,8 @@ data_collector = LeRobotDataCollector(
     output_dir="/Users/jack/lab_intern/dummy_ctrl/data/pick_place_0423",
     fps=30,
     camera_urls={
-        "cam_wrist": "http://192.168.65.124:8080/?action=stream",
-        "cam_head": "http://192.168.65.138:8080/?action=stream"
+        "cam_wrist": "http://192.168.237.100:8080/?action=stream",
+        "cam_head": "http://192.168.237.157:8080/?action=stream"
     },
     robot_type="thu_arm",
     use_video=True

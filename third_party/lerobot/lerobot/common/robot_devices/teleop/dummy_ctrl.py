@@ -100,11 +100,7 @@ class TeachFollowArmController:
         """
         """
         try:
-            # if self.teach_arms:
-            #     print("32894829348928489")
             teach_joints = list(self.teach_arms.read().values())
-            # print("32894829348928489")
-            # print(teach_joints)
             return {
                 'joint0': teach_joints[0],
                 'joint1': teach_joints[1],
@@ -114,21 +110,9 @@ class TeachFollowArmController:
                 'joint5': teach_joints[5],
                 'gripper': teach_joints[6]
             }
-            # else:
-            #     print("++++++++++++++++")
         except Exception as e:
             print(f"获取示教动作失败: {e}")
         
-        # 回退到保存的状态
-        # return {
-        #     'joint0': self.joints[0],
-        #     'joint1': self.joints[1],
-        #     'joint2': self.joints[2],
-        #     'joint3': self.joints[3],
-        #     'joint4': self.joints[4],
-        #     'joint5': self.joints[5],
-        #     'gripper': self.gripper
-        # }
     
     def get_eef(self) -> Dict:
         """

@@ -8,6 +8,7 @@ from lerobot.common.robot_devices.cameras.configs import (
     CameraConfig,
     IntelRealSenseCameraConfig,
     OpenCVCameraConfig,
+    NetworkCameraConfig,
 )
 from lerobot.common.robot_devices.motors.configs import (
     DynamixelMotorsBusConfig,
@@ -689,17 +690,17 @@ class DummyRobotConfig(RobotConfig):
 
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
-            "cam_wrist": OpenCVCameraConfig(
-                url="http://192.168.65.124:8080/?action=stream",  # 使用IP摄像头URL
+            "cam_head": NetworkCameraConfig(
+                url="http://192.168.237.100:8080/?action=stream",  # 使用IP摄像头URL
                 fps=30,
                 width=1280,
                 height=720,
             ),
-            "cam_head": OpenCVCameraConfig(
-                url="http://192.168.65.138:8080/?action=stream",  # 使用IP摄像头URL
-                fps=30,
-                width=1280,
-                height=720,
-            ),
+            # "cam_head": NetworkCameraConfig(
+            #     url="http://192.168.237.157:8080/?action=stream",  # 使用IP摄像头URL
+            #     fps=30,
+            #     width=1280,
+            #     height=720,
+            # ),
         }
     )
