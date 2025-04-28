@@ -355,7 +355,8 @@ def main():
     parser.add_argument("--server", default="localhost:50051", help="Server address")
     parser.add_argument("--serial_number", default="396636713233", help="Serial number of the follower arm")
     parser.add_argument("--camera_wrist", default="http://192.168.237.100:8080/?action=stream", help="Wrist camera URL")
-    parser.add_argument("--camera_head", default="http://192.168.237.157:8080/?action=stream", help="Head camera URL (optional)")
+    # parser.add_argument("--camera_head", default="http://192.168.237.157:8080/?action=stream", help="Head camera URL (optional)")
+    parser.add_argument("--camera_head", default="None", help="Head camera URL (optional)")
     parser.add_argument("--wrist_resolution", default="1280x720", help="Wrist camera resolution (WxH)")
     parser.add_argument("--head_resolution", default="1280x720", help="Head camera resolution (WxH)")
     parser.add_argument("--inference_time_s", type=int, default=300, help="Inference time in seconds")
@@ -486,7 +487,7 @@ def main():
     follower_arm = fibre.find_any(serial_number=args.serial_number, logger=logger_fibre)
     follower_arm.robot.resting()
     follower_arm.robot.set_enable(True)
-    # follower_arm.robot.move_j(0, -30, 90, 0, 70, 0)
+    follower_arm.robot.move_j(0, -30, 90, 0, 70, 0)
     # follower_arm.robot.move_j(0, 0, 90, 0, 0, 0)
     joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
     
