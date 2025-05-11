@@ -691,7 +691,7 @@ class DummyRobotConfig(RobotConfig):
     cameras: dict[str, CameraConfig] = field(
         default_factory=lambda: {
             "cam_head": NetworkCameraConfig(
-                url="http://192.168.237.100:8080/?action=stream",  # 使用IP摄像头URL
+                url="http://192.168.65.124:8080/?action=stream",  # 使用IP摄像头URL
                 fps=30,
                 width=1280,
                 height=720,
