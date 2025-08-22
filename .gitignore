@@ -1,21 +1,91 @@
-# Python-generated files
+# Claude Code
+.claude/
+
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
+develop-eggs/
 dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
 wheels/
-*.egg-info
-datasets/
-misc/
-act/
+*.egg-info/
+.installed.cfg
+*.egg
+
 # Virtual environments
+.env
 .venv
-.vscode/
-*.cache
-.cache/
-*.github
-.github/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# UV package manager
+.uv/
+uv.lock
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Temporary files and results
+temp/
+logs/
 checkpoints/
+eval_results/
+*.log
+*.txt.backup
+
+# Model files
+*.pth
+*.pt
+*.safetensors
+*.ckpt
+
+# Data files
 data/
-log/
-wandb/
+datasets/
+*.parquet
+*.hdf5
+*.h5
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Hardware/Robot specific
+*.fibre
+*.odrive
+
+# Media files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.jpg
+*.jpeg
+*.png
+*.gif
