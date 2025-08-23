@@ -1,15 +1,17 @@
-import json
 import time
 import numpy as np
 from pathlib import Path
-from datetime import datetime
 import logging
 import cv2
 import os
 import shutil
 import pandas as pd
-# from safetensors.torch import save_file
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict
+import av
+
+from .timing_utils import get_precise_timestamp, TimestampObsAccumulator, TimestampActionAccumulator
+from .camera_utils import start_camera_thread, get_latest_frame
+from queue import Queue
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -70,6 +72,9 @@ class LeRobotDataCollector:
         self.task = task  # Store the task instruction for PI0 models
         self.episode_data_index = {"from": [], "to": []}
         self.episode_lengths = []
+        
+        # PyAV video writers for direct streaming
+        self.video_writers = {} if use_video and camera_urls else None
         # Current episode data
         self.current_episode_data = {
             "observation.state": [],
@@ -85,6 +90,20 @@ class LeRobotDataCollector:
         
         self.frame_count = 0
         self.start_time = None
+        
+        # High-precision timer
+        self.timer_start_time = time.monotonic()
+        logger.info(f"Initialized timer at {self.timer_start_time:.6f}")
+        
+        # Timestamp accumulators for synchronized data
+        self.obs_accumulator = TimestampObsAccumulator(
+            start_time=0.0,  # Relative to timer_start_time
+            dt=1.0/fps
+        )
+        self.action_accumulator = TimestampActionAccumulator(
+            start_time=0.0,  # Relative to timer_start_time
+            dt=1.0/fps
+        )
 
         # Temp directories for video encoding
         self.tmp_img_dirs = {
@@ -92,12 +111,38 @@ class LeRobotDataCollector:
             "cam_head": self.output_dir / "tmp_images_head"
         }
 
-        # Camera setup
+        # Camera setup with threads
         self.camera_urls = camera_urls or {}
+        self.camera_queues = {}
+        self.camera_threads = {}
+        
+        # Keep old caps for compatibility
         self.caps = {"cam_wrist": None, "cam_head": None}
         
         if camera_urls:
             self.setup_cameras()
+            self._setup_camera_threads()
+
+    def _setup_camera_threads(self):
+        """Setup camera capture threads"""
+        for camera_name, camera_url in self.camera_urls.items():
+            if camera_name not in ["cam_wrist", "cam_head"]:
+                logger.warning(f"Unrecognized camera name: {camera_name}, skipping")
+                continue
+            
+            logger.info(f"Setting up camera thread {camera_name}: {camera_url}")
+            try:
+                # Create queue and start thread
+                frame_queue = Queue(maxsize=10)
+                thread = start_camera_thread(camera_url, frame_queue, self.timer_start_time, target_fps=30)
+                
+                self.camera_queues[camera_name] = frame_queue
+                self.camera_threads[camera_name] = thread
+                
+                logger.info(f"Camera thread {camera_name} started successfully")
+                
+            except Exception as e:
+                logger.error(f"Error setting up camera thread {camera_name}: {e}")
 
     def setup_cameras(self) -> bool:
         """Setup all camera captures"""
@@ -148,12 +193,18 @@ class LeRobotDataCollector:
         for key in self.current_episode_data:
             self.current_episode_data[key] = []
             
-        # Create clean temp image directories
-        if self.use_video:
-            for cam_name, tmp_dir in self.tmp_img_dirs.items():
-                if tmp_dir.exists():
-                    shutil.rmtree(tmp_dir)
-                tmp_dir.mkdir(parents=True, exist_ok=True)
+        # Reset video writers for new episode
+        if self.use_video and self.video_writers is not None:
+            # Close any existing video writers
+            for cam_name, writer in self.video_writers.items():
+                if writer is not None:
+                    container, stream = writer
+                    # Flush remaining frames
+                    for packet in stream.encode():
+                        container.mux(packet)
+                    container.close()
+            # Reset writers dict
+            self.video_writers = {cam_name: None for cam_name in self.camera_urls.keys()}
         
         # Reset and clear camera buffers completely
         if self.camera_urls:
@@ -185,72 +236,77 @@ class LeRobotDataCollector:
         """Collect one timestep of data"""
         if self.start_time is None:
             self.start_episode()
-        rate = 1 / self.fps
-        # Use fixed timestamp increment of rate seconds
-        timestamp = np.float64(self.frame_count * rate)
+        # Use high-precision timestamp
+        timestamp = get_precise_timestamp(self.timer_start_time)
+        logger.debug(f"Frame {self.frame_count}: timestamp={timestamp:.6f}s")
         
-        # Capture frames from both cameras with improved reliability
+        # Get latest frames from camera threads (non-blocking)
         frames = {}
-        for cam_name, cap in self.caps.items():
-            if cap and cap.isOpened():
-                try:
-                    # First try to release any buffered frames
-                    for _ in range(3):  # Try to clear some cache
-                        cap.grab()
-                    
-                    # Then capture new frame
-                    ret, frame = cap.read()
-                    if ret and frame is not None and self.use_video:
-                        img_path = self.tmp_img_dirs[cam_name] / f"frame_{self.frame_count:05d}.png"
-                        
-                        # Ensure save directory exists
-                        if not img_path.parent.exists():
-                            img_path.parent.mkdir(parents=True, exist_ok=True)
-                            
-                        # Save image with highest quality
-                        success = cv2.imwrite(str(img_path), frame, [cv2.IMWRITE_PNG_COMPRESSION, 0])
-                        
-                        if success:
-                            frames[cam_name] = frame
-                            
-                            # Force file system sync periodically
-                            if self.frame_count % 30 == 0:
-                                try:
-                                    os.fsync(os.open(str(img_path), os.O_RDONLY))
-                                except Exception as e:
-                                    logger.debug(f"Failed to sync file system: {e}")
-                        else:
-                            logger.error(f"Failed to save image for {cam_name}: {img_path}")
-                    else:
-                        logger.warning(f"Camera '{cam_name}' failed to capture valid frame")
-                        
-                        # Try to reinitialize camera
-                        if not ret:
-                            attempts = 0
-                            while attempts < 3 and not ret:
-                                logger.info(f"Attempting to reinitialize camera {cam_name} (attempt {attempts+1})")
-                                cap.release()
-                                time.sleep(0.5)
-                                self.setup_cameras()
-                                if self.caps[cam_name] and self.caps[cam_name].isOpened():
-                                    ret, frame = self.caps[cam_name].read()
-                                    if ret and frame is not None:
-                                        logger.info(f"Camera {cam_name} reinitialization successful")
-                                        frames[cam_name] = frame
-                                        break
-                                attempts += 1
-                except Exception as e:
-                    logger.error(f"Error capturing frame from {cam_name}: {e}")
-                    # Try to recover camera connection
-                    try:
-                        cap.release()
-                        time.sleep(1)
-                        self.setup_cameras()
-                        logger.info(f"Attempted to recover camera {cam_name} connection")
-                    except Exception as recovery_e:
-                        logger.error(f"Failed to recover camera connection: {recovery_e}")
         
-        # Store state and action data
+        # Try camera threads first
+        for cam_name, queue in self.camera_queues.items():
+            frame_info = get_latest_frame(queue, max_age=0.1, timer_start_time=self.timer_start_time)
+            if frame_info:
+                frame_timestamp, frame = frame_info
+                frames[cam_name] = frame
+                logger.debug(f"Got frame from {cam_name} thread at {frame_timestamp:.6f}s")
+            else:
+                logger.warning(f"No recent frame from camera thread {cam_name}")
+        
+        # Fallback to old synchronous method if no threads
+        if not frames:
+            for cam_name, cap in self.caps.items():
+                if cap and cap.isOpened():
+                    try:
+                        # First try to release any buffered frames
+                        for _ in range(3):  # Try to clear some cache
+                            cap.grab()
+                        
+                        # Then capture new frame
+                        ret, frame = cap.read()
+                        
+                        if ret and frame is not None:
+                            frames[cam_name] = frame
+                            logger.debug(f"Got fallback frame from {cam_name}")
+                    except Exception as e:
+                        logger.error(f"Error in fallback capture for {cam_name}: {e}")
+        
+        # Write frames directly to video stream if using video
+        if self.use_video and self.video_writers is not None:
+            for cam_name, frame in frames.items():
+                if frame is not None:
+                    # Lazy initialization of video writers
+                    if cam_name not in self.video_writers or self.video_writers[cam_name] is None:
+                        video_path = self.camera_dirs[cam_name] / f"episode_{self.episode_count:06d}.mp4"
+                        container = av.open(str(video_path), mode='w')
+                        stream = container.add_stream('h264', rate=self.fps)
+                        h, w = frame.shape[:2]
+                        stream.width = w
+                        stream.height = h
+                        stream.pix_fmt = 'yuv420p'
+                        stream.codec_context.options = {'crf': '18', 'profile': 'high'}
+                        self.video_writers[cam_name] = (container, stream)
+                        logger.info(f"Created video writer for {cam_name}: {video_path}")
+                    
+                    # Write frame directly to video stream
+                    container, stream = self.video_writers[cam_name]
+                    av_frame = av.VideoFrame.from_ndarray(frame, format='bgr24')
+                    for packet in stream.encode(av_frame):
+                        container.mux(packet)
+        
+        # Prepare observation data (robot state only for accumulator)
+        obs_data = {
+            'robot_state': np.array([follow + [float(follow_gripper)]])
+        }
+        
+        # Prepare action data (teach commands)
+        action_data = np.array([teach + [float(teach_gripper)]])
+        
+        # Push to separate accumulators
+        self.obs_accumulator.put(obs_data, np.array([timestamp]))
+        self.action_accumulator.put(action_data[None, :], np.array([timestamp]))
+        
+        # Store in old format for compatibility
         self.current_episode_data["observation.state"].append(
             np.concatenate([follow, [float(follow_gripper)]]).tolist()
         )
@@ -290,59 +346,21 @@ class LeRobotDataCollector:
         existing_parquets = list(self.current_chunk_dir.glob("episode_*.parquet"))
         next_index = len(existing_parquets)
                 
-        # Save videos if enabled
-        if self.use_video:
-            for cam_name, cam_dir in self.camera_dirs.items():
-                if cam_name in self.caps and self.caps[cam_name]:
-                    # Check for existing videos to maintain consistent indexing
-                    video_filename = f"episode_{next_index:06d}.mp4"
-                    video_path = cam_dir / video_filename
-                    
-                    tmp_dir = self.tmp_img_dirs[cam_name]
-                    if tmp_dir.exists() and list(tmp_dir.glob("*.png")):
-                        # First try using OpenCV directly
-                        success = False
-                        try:
-                            frame_files = sorted(tmp_dir.glob("frame_*.png"))
-                            if frame_files:
-                                # Read first frame to get dimensions
-                                test_img = cv2.imread(str(frame_files[0]))
-                                if test_img is not None:
-                                    height, width = test_img.shape[:2]
-                                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                                    video_writer = cv2.VideoWriter(str(video_path), fourcc, self.fps, (width, height))
-                                    
-                                    if video_writer.isOpened():
-                                        for frame_file in frame_files:
-                                            img = cv2.imread(str(frame_file))
-                                            if img is not None:
-                                                video_writer.write(img)
-                                        
-                                        video_writer.release()
-                                        logger.info(f"Successfully saved video using OpenCV for {cam_name}: {video_path}")
-                                        success = True
-                                    else:
-                                        logger.error(f"OpenCV video writer creation failed for {cam_name}: {video_path}")
-                        except Exception as e:
-                            logger.error(f"Failed to save video using OpenCV for {cam_name}: {e}")
-                        
-                        # If OpenCV fails, try ffmpeg
-                        if not success:
-                            cmd = f"ffmpeg -y -framerate {self.fps} -i {tmp_dir}/frame_%05d.png "\
-                                f"-c:v libx264 -pix_fmt yuv420p -crf 23 {str(video_path)}"
-                            result = os.system(cmd)
-                            if result != 0:
-                                logger.error(f"ffmpeg command failed for {cam_name}, return code: {result}")
-                                # Backup frames as individual files
-                                backup_dir = cam_dir / f"episode_{next_index:06d}_frames"
-                                try:
-                                    backup_dir.mkdir(parents=True, exist_ok=True)
-                                    for frame_file in frame_files:
-                                        dst_file = backup_dir / frame_file.name
-                                        shutil.copy2(frame_file, dst_file)
-                                    logger.info(f"Successfully backed up frames for {cam_name} to {backup_dir}")
-                                except Exception as e:
-                                    logger.error(f"Failed to backup frames for {cam_name}: {e}")
+        # Close video writers if enabled
+        if self.use_video and self.video_writers is not None:
+            for cam_name, writer in self.video_writers.items():
+                if writer is not None:
+                    container, stream = writer
+                    try:
+                        # Flush remaining frames
+                        for packet in stream.encode():
+                            container.mux(packet)
+                        container.close()
+                        logger.info(f"Successfully saved video for {cam_name}")
+                    except Exception as e:
+                        logger.error(f"Failed to close video writer for {cam_name}: {e}")
+            # Reset writers
+            self.video_writers = {cam_name: None for cam_name in self.camera_urls.keys()}
         
         # Store episode data in memory
         episode_data = {}
@@ -363,14 +381,7 @@ class LeRobotDataCollector:
         self.total_frames += self.frame_count
         self.episode_count += 1
         
-        # Cleanup
-        for tmp_dir in self.tmp_img_dirs.values():
-            if tmp_dir.exists():
-                try:
-                    time.sleep(0.5)  # Wait to ensure all file operations are complete
-                    shutil.rmtree(tmp_dir)
-                except Exception as e:
-                    logger.error(f"Failed to clean up temporary directory: {e}")
+        # No temporary directories to cleanup with PyAV direct streaming
                 
         self.episode_lengths.append(self.frame_count)        
         logger.info(f"Episode {next_index} saved with {self.frame_count} frames")
@@ -378,6 +389,54 @@ class LeRobotDataCollector:
 
     def __del__(self):
         """Cleanup resources"""
+        # Stop camera threads
+        for thread in self.camera_threads.values():
+            if hasattr(thread, 'stop_flag'):
+                thread.stop_flag['running'] = False
+            thread.join(timeout=2.0)
+        
+        # Cleanup old caps
         for cap in self.caps.values():
             if cap:
                 cap.release()
+    
+    def get_synchronized_data(self):
+        """Get time-aligned data from both accumulators"""
+        return {
+            'observations': {
+                'data': self.obs_accumulator.data,
+                'timestamps': self.obs_accumulator.timestamps,
+                'actual_timestamps': self.obs_accumulator.actual_timestamps,
+                'length': len(self.obs_accumulator)
+            },
+            'actions': {
+                'data': self.action_accumulator.actions,
+                'timestamps': self.action_accumulator.timestamps,
+                'actual_timestamps': self.action_accumulator.actual_timestamps,
+                'length': len(self.action_accumulator)
+            }
+        }
+    
+    def get_latest_frames(self):
+        """Get latest frames from all cameras for visualization"""
+        frames = {}
+        
+        # Try camera threads first
+        for cam_name, queue in self.camera_queues.items():
+            frame_info = get_latest_frame(queue, max_age=0.1, timer_start_time=self.timer_start_time)
+            if frame_info:
+                frame_timestamp, frame = frame_info
+                frames[cam_name] = frame
+        
+        # Fallback to synchronous capture if no thread frames
+        if not frames:
+            for cam_name, cap in self.caps.items():
+                if cap and cap.isOpened():
+                    try:
+                        ret, frame = cap.read()
+                        if ret and frame is not None:
+                            frames[cam_name] = frame
+                    except Exception as e:
+                        logger.error(f"Error getting frame from {cam_name}: {e}")
+        
+        return frames

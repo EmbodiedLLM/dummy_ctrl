@@ -15,6 +15,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+RAD_TO_DEG = 180.0 / np.pi
+DEG_TO_RAD = np.pi / 180.0
+
 class ArmController:
     def __init__(self, arm, joint_offset=np.array([0.0, -73.0, 180.0, 0.0, 0.0, 0.0])):
         """初始化机械臂控制器
@@ -25,7 +28,9 @@ class ArmController:
         """
         self.arm = arm
         self.joint_offset = joint_offset
-    
+        self.kp_gripper = 0.8
+        self.kd_gripper = 0.05
+
     def get_joints(self):
         """获取机械臂的关节角度"""
         joints = np.array([
@@ -59,7 +64,10 @@ class ArmController:
         Args:
             angle: 夹爪角度
         """
-        self.arm.robot.hand.set_angle(angle)
+        position = angle * DEG_TO_RAD
+        self.arm.robot.hand.set_enable(True)
+        # self.arm.robot.hand.set_position(position)
+        self.arm.robot.hand.control_mit(self.kp_gripper, self.kd_gripper, position, 0, 0)
 
 def read_parquet_data(parquet_path: str) -> pd.DataFrame:
     """从parquet文件中读取数据

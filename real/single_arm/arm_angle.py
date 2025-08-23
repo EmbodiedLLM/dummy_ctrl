@@ -1,5 +1,7 @@
 import numpy as np
 
+RAD_TO_DEG = 180.0 / np.pi
+DEG_TO_RAD = np.pi / 180.0
 class ArmAngle:
     def __init__(self, teach_arm, follow_arm, joint_offset):
         """初始化机械臂角度类
@@ -12,6 +14,34 @@ class ArmAngle:
         self.teach_arm = teach_arm
         self.follow_arm = follow_arm
         self.joint_offset = joint_offset
+    
+    def refresh_teach_hand(self):
+        self.teach_arm.robot.hand.set_enable(True)
+
+    def refresh_follow_hand(self):
+        self.follow_arm.robot.hand.set_enable(True)
+    
+    def get_teach_hand_position(self, in_angle=False):
+        self.refresh_teach_hand()
+        if in_angle:
+            return self.teach_arm.robot.hand.position * RAD_TO_DEG
+        else:
+            return self.teach_arm.robot.hand.position
+
+    def get_follow_hand_position(self, in_angle=False):
+        self.refresh_follow_hand()
+        if in_angle:
+            return self.follow_arm.robot.hand.position * RAD_TO_DEG
+        else:
+            return self.follow_arm.robot.hand.position
+
+    def get_teach_hand_torque(self):
+        self.refresh_teach_hand()
+        return self.teach_arm.robot.hand.torque
+    
+    def get_follow_hand_torque(self):
+        self.refresh_follow_hand()
+        return self.follow_arm.robot.hand.torque
 
     def get_teach_joints(self):
         """获取示教臂的关节角度"""

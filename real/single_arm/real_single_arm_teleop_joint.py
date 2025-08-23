@@ -10,36 +10,49 @@ import threading
 # Replace with the modified LeRobotDataCollector
 from single_arm.real_collector import LeRobotDataCollector
 from single_arm.arm_angle import ArmAngle
-from single_arm.bi_gripper_open import gripper_open
 # logger verbose=True
 logger = fibre.utils.Logger(verbose=True)
 # %%
 # Use the modified data collector with both cameras
 data_collector = LeRobotDataCollector(
-    output_dir="/Users/jack/lab_intern/dummy_ctrl/data/pick_place_0414",
+    output_dir="/Users/yinzi/dummy_ctrl/data/pick_place_20250822",
     fps=10,
     camera_urls={
-        "cam_wrist": "http://192.168.237.100:8080/?action=stream",
-        "cam_head": "http://192.168.237.157:8080/?action=stream"
+        # "cam_wrist": "http://192.168.237.100:8080/?action=stream",
+        "cam_wrist": "0",
+        # "cam_head": "http://192.168.237.157:8080/?action=stream"
+        "cam_head": "1"
     },
-    robot_type="thu_arm",
+    robot_type="thu_dummy_arm",
     use_video=True
 )
-# %%
-teach_arm = fibre.find_any(serial_number="208C31875253", logger=logger)
 #%%
-follow_arm = fibre.find_any(serial_number="396636713233", logger=logger)
+teach_arm_SN = "3950366E3233"
+follow_arm_SN = "396636713233"
 # %%
-teach_arm.robot.resting()
+teach_arm = fibre.find_any(serial_number=teach_arm_SN, logger=logger)
+#%%
+follow_arm = fibre.find_any(serial_number=follow_arm_SN, logger=logger)
+#%%
+teach_arm.robot.set_enable(True)
+follow_arm.robot.set_enable(True)
+logger.info("Moving Teach Arm to Resting Pose")
+logger.info("Moving Follow Arm to Resting Pose")
+teach_arm.robot.move_j(0, -90, 90, 0, 70, 0)
+
+
+# %%
+# teach_arm.robot.resting()
+# teach_arm.robot.resting()
 follow_arm.robot.resting()
 joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
 # %%
 teach_arm.robot.set_enable(True)
 follow_arm.robot.set_enable(True)
 logger.info("Moving Teach Arm to Working Pose")
-logger.info("Moving Lead Arm to Working Pose")
-teach_arm.robot.move_j(0, -30, 90, 0, 70, 0)
-follow_arm.robot.move_j(0, -30, 90, 0, 70, 0)
+logger.info("Moving Follow Arm to Working Pose")
+teach_arm.robot.move_j(0, -73, 180, 0, 0, 0)
+follow_arm.robot.move_j(0, -73, 180, 0, 0, 0)
 #%%
 teach_hand_init_angle = teach_arm.robot.hand.angle
 follow_hand_init_angle = follow_arm.robot.hand.angle
