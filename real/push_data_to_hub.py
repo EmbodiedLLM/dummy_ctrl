@@ -3,8 +3,8 @@ from pathlib import Path
 from huggingface_hub import HfApi
 
 # python push_to_hub.py \
-#   --data-dir /Users/jack/Desktop/dummy_ctrl/datasets/pick_cube_20demos \
-#   --repo-id JackYuuuu/test
+#   --data_dir /Users/jack/Desktop/dummy_ctrl/datasets/pick_cube_20demos \
+#   --repo_id JackYuuuu/test
 
 def push_dataset_to_hub(
     data_dir: Path,

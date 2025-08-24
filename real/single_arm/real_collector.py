@@ -75,6 +75,11 @@ class LeRobotDataCollector:
         
         # PyAV video writers for direct streaming
         self.video_writers = {} if use_video and camera_urls else None
+        # Temporary video files for current episode
+        self.temp_video_writers = {} if use_video and camera_urls else None
+        self.temp_video_dir = self.output_dir / "temp_videos"
+        if use_video:
+            self.temp_video_dir.mkdir(exist_ok=True)
         # Current episode data
         self.current_episode_data = {
             "observation.state": [],
@@ -193,6 +198,29 @@ class LeRobotDataCollector:
         for key in self.current_episode_data:
             self.current_episode_data[key] = []
             
+        # Close any existing temp video writers and cleanup temp directory
+        if self.temp_video_writers is not None:
+            for cam_name, writer in self.temp_video_writers.items():
+                if writer is not None:
+                    container, stream = writer
+                    try:
+                        # Flush remaining frames
+                        for packet in stream.encode():
+                            container.mux(packet)
+                        container.close()
+                    except Exception as e:
+                        logger.error(f"Error closing temp video writer for {cam_name}: {e}")
+            self.temp_video_writers = {cam_name: None for cam_name in self.camera_urls.keys() if self.camera_urls}
+            
+        # Clean up any existing temp video files
+        if hasattr(self, 'temp_video_dir') and self.temp_video_dir.exists():
+            try:
+                for temp_file in self.temp_video_dir.glob("temp_episode_*.mp4"):
+                    temp_file.unlink()
+                    logger.debug(f"Removed temp video file: {temp_file}")
+            except Exception as e:
+                logger.error(f"Error cleaning up temp video files: {e}")
+            
         # Reset video writers for new episode
         if self.use_video and self.video_writers is not None:
             # Close any existing video writers
@@ -271,25 +299,25 @@ class LeRobotDataCollector:
                     except Exception as e:
                         logger.error(f"Error in fallback capture for {cam_name}: {e}")
         
-        # Write frames directly to video stream if using video
-        if self.use_video and self.video_writers is not None:
+        # Write frames directly to temporary video files
+        if self.use_video and self.temp_video_writers is not None:
             for cam_name, frame in frames.items():
                 if frame is not None:
-                    # Lazy initialization of video writers
-                    if cam_name not in self.video_writers or self.video_writers[cam_name] is None:
-                        video_path = self.camera_dirs[cam_name] / f"episode_{self.episode_count:06d}.mp4"
-                        container = av.open(str(video_path), mode='w')
+                    # Lazy initialization of temp video writers
+                    if cam_name not in self.temp_video_writers or self.temp_video_writers[cam_name] is None:
+                        temp_video_path = self.temp_video_dir / f"temp_episode_{self.episode_count}_{cam_name}.mp4"
+                        container = av.open(str(temp_video_path), mode='w')
                         stream = container.add_stream('h264', rate=self.fps)
                         h, w = frame.shape[:2]
                         stream.width = w
                         stream.height = h
                         stream.pix_fmt = 'yuv420p'
                         stream.codec_context.options = {'crf': '18', 'profile': 'high'}
-                        self.video_writers[cam_name] = (container, stream)
-                        logger.info(f"Created video writer for {cam_name}: {video_path}")
+                        self.temp_video_writers[cam_name] = (container, stream)
+                        logger.debug(f"Created temp video writer for {cam_name}: {temp_video_path}")
                     
-                    # Write frame directly to video stream
-                    container, stream = self.video_writers[cam_name]
+                    # Write frame to temp video
+                    container, stream = self.temp_video_writers[cam_name]
                     av_frame = av.VideoFrame.from_ndarray(frame, format='bgr24')
                     for packet in stream.encode(av_frame):
                         container.mux(packet)
@@ -323,14 +351,6 @@ class LeRobotDataCollector:
         self.current_episode_data["task"].append(self.task)
         
         self.frame_count += 1
-        
-        # Force periodic frame saving
-        if self.frame_count % 100 == 0:  # Save every 100 frames
-            try:
-                os.sync()  # Lightweight sync
-                logger.debug(f"Synced {self.frame_count} frames to disk")
-            except Exception as e:
-                logger.error(f"Failed to sync frames to disk: {e}")
 
     def save_episode(self):
         """Save episode data"""
@@ -346,9 +366,9 @@ class LeRobotDataCollector:
         existing_parquets = list(self.current_chunk_dir.glob("episode_*.parquet"))
         next_index = len(existing_parquets)
                 
-        # Close video writers if enabled
-        if self.use_video and self.video_writers is not None:
-            for cam_name, writer in self.video_writers.items():
+        # Close temp video writers and move to permanent location
+        if self.use_video and self.temp_video_writers is not None:
+            for cam_name, writer in self.temp_video_writers.items():
                 if writer is not None:
                     container, stream = writer
                     try:
@@ -356,11 +376,22 @@ class LeRobotDataCollector:
                         for packet in stream.encode():
                             container.mux(packet)
                         container.close()
-                        logger.info(f"Successfully saved video for {cam_name}")
+                        
+                        # Move temp video to permanent location
+                        temp_path = self.temp_video_dir / f"temp_episode_{self.episode_count}_{cam_name}.mp4"
+                        permanent_path = self.camera_dirs[cam_name] / f"episode_{next_index:06d}.mp4"
+                        
+                        if temp_path.exists():
+                            shutil.move(str(temp_path), str(permanent_path))
+                            logger.info(f"Moved video from temp to {permanent_path}")
+                        else:
+                            logger.warning(f"Temp video file not found: {temp_path}")
+                            
                     except Exception as e:
-                        logger.error(f"Failed to close video writer for {cam_name}: {e}")
-            # Reset writers
-            self.video_writers = {cam_name: None for cam_name in self.camera_urls.keys()}
+                        logger.error(f"Error saving video for {cam_name}: {e}")
+            
+            # Reset temp writers
+            self.temp_video_writers = {cam_name: None for cam_name in self.camera_urls.keys()}
         
         # Store episode data in memory
         episode_data = {}

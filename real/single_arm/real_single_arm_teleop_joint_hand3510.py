@@ -166,6 +166,7 @@ follow_hand = follow_arm.robot.hand
 teach_hand = teach_arm.robot.hand
 teach_arm.robot.set_enable(False)
 RAD2DEG = 180.0 / np.pi
+teach_arm.robot.set_enable(False)
 while not stop:
     start_time = time.time()
     
