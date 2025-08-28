@@ -31,112 +31,43 @@ class MotorStateCache:
         with self._lock:
             return self._states.copy()
 
-# --- Corrected Position Updater Thread ---
-class PositionUpdaterThread(threading.Thread):
+# --- Unified CAN Communication Thread ---
+class UnifiedCANThread(threading.Thread):
     """
-    A background thread that continuously polls motor positions at a fixed frequency,
-    using the MotorControl class.
+    统一的CAN通信线程，优先处理MIT控制命令，无命令时进行状态查询
+    集成了原PositionUpdaterThread和AsyncCommandSendThread的功能
     """
-    def __init__(self, motor_control, motor_map, cache, zero_positions, frequency=50, disconnect_timeout=1.0):
+    
+    def __init__(self, motor_control, motor_map, cache, zero_positions, 
+                 frequency=50, disconnect_timeout=1.0, max_command_age=0.1):
         super().__init__(daemon=True)
         self._mc = motor_control
-        self._motor_map = motor_map # A map of {master_id: Motor_object}
+        self._motor_map = motor_map  # A map of {master_id: Motor_object}
         self._cache = cache
         self._zero_positions = zero_positions
         self._period = 1.0 / frequency
         self._disconnect_timeout = disconnect_timeout
         self._last_seen_time = {mid: time.monotonic() for mid in self._motor_map.keys()}
+        
+        # Build bidirectional ID mapping
+        self._master_to_slave = {motor.MasterID: motor.SlaveID for motor in motor_map.values()}
+        self._slave_to_master = {motor.SlaveID: motor.MasterID for motor in motor_map.values()}
+        
         self._running = threading.Event()
         self._running.set()
-
-    def _request_status(self, motor):
-        """
-        Sends a status request command for a single motor.
-        This is a re-implementation of the sending part of refresh_motor_status
-        to allow for batch requests.
-        """
-        try:
-            # This uses the private __send_data method to avoid the blocking recv()
-            # in the public refresh_motor_status() method.
-            can_id_l = motor.SlaveID & 0xff
-            can_id_h = (motor.SlaveID >> 8) & 0xff
-            data_buf = np.array([np.uint8(can_id_l), np.uint8(can_id_h), 0xCC, 0, 0, 0, 0, 0], dtype=np.uint8)
-            # Accessing private method for performance reasons
-            self._mc._MotorControl__send_data(0x7FF, data_buf)
-        except Exception as e:
-            print(f"Error requesting status for motor {motor.SlaveID}: {e}")
-
-
-    def run(self):
-        """The main loop of the thread."""
-        while self._running.is_set():
-            start_time = time.monotonic()
-
-            if self._mc.serial_.is_open:
-                # 1. Request state from all motors
-                for motor in self._motor_map.values():
-                    self._request_status(motor)
-                    time.sleep(0.001)
-
-                # 2. Call recv() and get a list of motors that responded
-                responsive_ids = self._mc.recv()
-
-                # Update last seen time for responsive motors
-                now = time.monotonic()
-                for motor_id in responsive_ids:
-                    self._last_seen_time[motor_id] = now
-
-                # 3. Update cache for all motors based on their status
-                for motor_id, motor in self._motor_map.items():
-                    time_since_last_seen = now - self._last_seen_time[motor_id]
-
-                    if time_since_last_seen > self._disconnect_timeout:
-                        # Motor is disconnected
-                        state = {
-                            'status': 'disconnected',
-                            'last_seen': self._last_seen_time[motor_id]
-                        }
-                    else:
-                        # Motor is connected, update with latest data
-                        abs_pos_rad = motor.getPosition()  # Keep in radians
-                        rel_pos_rad = abs_pos_rad - self._zero_positions[motor_id]  # Relative in radians
-                        abs_pos = abs_pos_rad * RAD2ANGLE  # Convert to degrees for display
-                        rel_pos = rel_pos_rad * RAD2ANGLE  # Convert to degrees for display
-                        state = {
-                            'status': 'connected',
-                            'pos_abs': abs_pos,  # degrees for display
-                            'pos_rel': rel_pos_rad,  # radians for calculations
-                            'pos_rel_deg': rel_pos,  # degrees for display
-                            'vel': motor.getVelocity(),
-                            'tor': motor.getTorque(),
-                            'timestamp': time.time()
-                        }
-                    self._cache.update_state(motor_id, state)
-
-            # 4. Sleep for the rest of the cycle
-            elapsed_time = time.monotonic() - start_time
-            sleep_time = self._period - elapsed_time
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-
-    def stop(self):
-        """Stops the thread."""
-        self._running.clear()
-
-
-# --- Async Command Send Thread ---
-class AsyncCommandSendThread(threading.Thread):
-    """异步命令发送线程，支持时间戳调度"""
-    
-    def __init__(self, motor_control, max_command_age=0.1):
-        super().__init__(daemon=True)
-        self._mc = motor_control
+        
+        # Command queue and scheduling
         self._command_queue = queue.Queue()
-        self._running = threading.Event()
-        self._running.set()
-        self._max_command_age = max_command_age  # 最大命令年龄（秒）
+        self._max_command_age = max_command_age
         self._last_command_time = {}  # 每个电机的最新命令时间戳
-    
+        
+        # Statistics
+        self._stats = {
+            'commands_sent': 0,
+            'queries_sent': 0,
+            'commands_dropped': 0
+        }
+
     def add_mit_command(self, motor, kp, kd, pos, vel, torque):
         """添加MIT控制命令到队列，带时间戳调度"""
         current_time = time.time()
@@ -163,27 +94,18 @@ class AsyncCommandSendThread(threading.Thread):
         except queue.Full:
             print("Command queue full, dropping command")
             return False
-    
-    def run(self):
-        """发送线程主循环，带时间戳调度"""
-        while self._running.is_set():
-            try:
-                # 从队列获取命令，超时1ms
-                cmd = self._command_queue.get(timeout=0.001)
-                
-                if cmd['type'] == 'MIT':
-                    # 检查命令是否过时
-                    if self._should_execute_command(cmd):
-                        self._execute_mit_command(cmd)
-                    else:
-                        print(f"Dropping stale command for motor {cmd['motor_id']}, "
-                              f"age: {time.time() - cmd['timestamp']:.4f}s")
-                
-            except queue.Empty:
-                continue
-            except Exception as e:
-                print(f"Command send thread error: {e}")
-    
+
+    def _request_status(self, motor):
+        """发送电机状态查询命令"""
+        try:
+            can_id_l = motor.SlaveID & 0xff
+            can_id_h = (motor.SlaveID >> 8) & 0xff
+            data_buf = np.array([np.uint8(can_id_l), np.uint8(can_id_h), 0xCC, 0, 0, 0, 0, 0], dtype=np.uint8)
+            self._mc._MotorControl__send_data(0x7FF, data_buf)
+            self._stats['queries_sent'] += 1
+        except Exception as e:
+            print(f"Error requesting status for motor {motor.SlaveID}: {e}")
+
     def _should_execute_command(self, cmd):
         """判断是否应该执行该命令"""
         current_time = time.time()
@@ -201,13 +123,13 @@ class AsyncCommandSendThread(threading.Thread):
                 return False
         
         return True
-    
+
     def _execute_mit_command(self, cmd):
         """执行MIT控制命令"""
         try:
             motor = cmd['motor']
             if motor.SlaveID not in self._mc.motors_map:
-                return
+                return False
                 
             # 数据打包逻辑（从原始controlMIT复制）
             from DM_CAN import float_to_uint
@@ -232,14 +154,115 @@ class AsyncCommandSendThread(threading.Thread):
             data_buf[6] = ((kd_uint & 0xf) << 4) | ((tau_uint >> 8) & 0xf)
             data_buf[7] = tau_uint & 0xff
             
-            # 发送数据 - 在独立线程中执行
+            # 发送数据
             self._mc._MotorControl__send_data(motor.SlaveID, data_buf)
+            self._stats['commands_sent'] += 1
+            return True
             
         except Exception as e:
             print(f"MIT command execution error: {e}")
-    
+            return False
+
+    def _process_commands(self):
+        """处理队列中的命令，返回是否发送了命令"""
+        commands_sent = 0
+        
+        # 处理所有待处理的命令
+        while not self._command_queue.empty() and commands_sent < len(self._motor_map):
+            try:
+                cmd = self._command_queue.get_nowait()
+                
+                if cmd['type'] == 'MIT':
+                    if self._should_execute_command(cmd):
+                        if self._execute_mit_command(cmd):
+                            commands_sent += 1
+                            time.sleep(0.001)  # 短暂延时避免总线拥塞
+                    else:
+                        self._stats['commands_dropped'] += 1
+                        
+            except queue.Empty:
+                break
+            except Exception as e:
+                print(f"Command processing error: {e}")
+                
+        return commands_sent > 0
+
+    def _update_motor_states(self, responsive_ids):
+        """更新电机状态到缓存"""
+        now = time.monotonic()
+        
+        # Update last seen time for responsive motors
+        # responsive_ids contains MasterIDs, convert to SlaveIDs for _last_seen_time tracking
+        for master_id in responsive_ids:
+            slave_id = self._master_to_slave.get(master_id)
+            if slave_id is not None:
+                self._last_seen_time[slave_id] = now
+
+        # Update cache for all motors based on their status
+        for motor_id, motor in self._motor_map.items():
+            time_since_last_seen = now - self._last_seen_time[motor_id]
+
+            if time_since_last_seen > self._disconnect_timeout:
+                # Motor is disconnected
+                state = {
+                    'status': 'disconnected',
+                    'last_seen': self._last_seen_time[motor_id]
+                }
+            else:
+                # Motor is connected, update with latest data
+                abs_pos_rad = motor.getPosition()  # Keep in radians
+                rel_pos_rad = abs_pos_rad - self._zero_positions[motor_id]  # Relative in radians
+                abs_pos = abs_pos_rad * RAD2ANGLE  # Convert to degrees for display
+                rel_pos = rel_pos_rad * RAD2ANGLE  # Convert to degrees for display
+                state = {
+                    'status': 'connected',
+                    'pos_abs': abs_pos,  # degrees for display
+                    'pos_abs_rad': abs_pos_rad,  # radians for calculations
+                    'pos_rel': rel_pos_rad,  # radians for calculations
+                    'pos_rel_deg': rel_pos,  # degrees for display
+                    'vel': motor.getVelocity(),
+                    'tor': motor.getTorque(),
+                    'timestamp': time.time()
+                }
+            self._cache.update_state(motor_id, state)
+
+    def run(self):
+        """统一CAN通信线程主循环"""
+        while self._running.is_set():
+            start_time = time.monotonic()
+
+            if self._mc.serial_.is_open:
+                # 1. 优先处理控制命令
+                commands_sent = self._process_commands()
+                
+                # 2. 如果没有发送控制命令，则发送状态查询
+                if not commands_sent:
+                    for motor in self._motor_map.values():
+                        self._request_status(motor)
+                        time.sleep(0.001)  # 短暂延时避免总线拥塞
+
+                # 3. 接收所有回传帧并更新状态
+                responsive_ids = self._mc.recv()
+                self._update_motor_states(responsive_ids)
+
+            # 4. 保持固定循环频率
+            elapsed_time = time.monotonic() - start_time
+            sleep_time = self._period - elapsed_time
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    def get_stats(self):
+        """获取统计信息"""
+        return {
+            'queue_size': self._command_queue.qsize(),
+            'last_command_times': self._last_command_time.copy(),
+            'commands_sent': self._stats['commands_sent'],
+            'queries_sent': self._stats['queries_sent'],
+            'commands_dropped': self._stats['commands_dropped']
+        }
+
     def stop(self):
-        """停止发送线程"""
+        """停止线程"""
         self._running.clear()
 
 
