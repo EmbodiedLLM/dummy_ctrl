@@ -216,15 +216,22 @@ class LeRobotDataCollector:
                 # 展开嵌套字典结构
                 processed_data["observation.joint_states"] = [v["joint_states"] for v
     in values]
-                processed_data["observation.gripper_pos"] = [np.array([v["gripper_pos_deg"]]) for
-    v in values]
-                processed_data["observation.gripper_torque"] = [np.array([v["gripper_torque"]])
-    for v in values]
+                processed_data["observation.gripper_pos"] = [np.array([v["gripper_pos_deg"]]) for v in values]
+                processed_data["observation.gripper_torque"] = [np.array([v["gripper_torque"]]) for v in values]
             elif key == "action":
-                processed_data[key] = [
-                    np.concatenate([v["joint_states"], [v["gripper_pos_deg"]]]).tolist() if isinstance(v, dict) else v 
-                    for v in values
-                ]
+                # 修复：确保action是正确的格式，避免多余嵌套
+                processed_data[key] = []
+                for v in values:
+                    if isinstance(v, dict):
+                        # 如果action是字典格式
+                        action_array = np.concatenate([v["joint_states"], [v["gripper_pos_deg"]]])
+                        processed_data[key].append(action_array.tolist())
+                    elif isinstance(v, (list, np.ndarray)):
+                        # 如果action已经是列表或数组格式
+                        processed_data[key].append(np.array(v).flatten().tolist())
+                    else:
+                        # 标量值转为单元素列表
+                        processed_data[key].append([v])
             else:
                 processed_data[key] = values
 
@@ -335,18 +342,8 @@ class LeRobotDataCollector:
                 try:
                     # 转换为numpy数组进行统计
                     if key == "action":
-                        # action数据处理 - 避免多余嵌套
-                        data_list = []
-                        for item in processed_data[key]:
-                            if isinstance(item, list):
-                                data_list.append(item)
-                            else:
-                                data_list.append([item])
-                        arr = np.array(data_list)
-                        
-                        # 重新整形数据，去除多余的维度
-                        if arr.ndim == 3 and arr.shape[1] == 1:
-                            arr = arr.reshape(arr.shape[0], arr.shape[2])  # (N, 1, 7) -> (N, 7)
+                        # 修复：action数据处理，确保正确格式
+                        arr = np.array(processed_data[key])
                         
                         # 计算统计信息
                         stats[key] = {
@@ -358,7 +355,7 @@ class LeRobotDataCollector:
                         }
                         
                     elif key in ["observation.gripper_pos", "observation.gripper_torque"]:
-                        # gripper数据处理
+                        # 修复：gripper数据处理，确保是1维数组格式
                         data_list = []
                         for item in processed_data[key]:
                             if hasattr(item, '__len__') and not isinstance(item, str):
@@ -447,6 +444,7 @@ class LeRobotDataCollector:
             "total_frames": self.total_frames,
             "total_tasks": 1,
             "total_videos": video_count,
+            "chunks_size": 1000,  # 修复：添加必需的chunks_size字段
             "splits": {"train": f"0:{self.episode_count}"},
             "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
             "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
@@ -459,12 +457,12 @@ class LeRobotDataCollector:
                 },
                 "observation.gripper_pos": {
                     "dtype": "float32",
-                    "shape": [1],
+                    "shape": [1],  # 修复：确保是[1]而不是[]
                     "names": ["gripper_position_deg"]
                 },
                 "observation.gripper_torque": {
                     "dtype": "float32", 
-                    "shape": [1],
+                    "shape": [1],  # 修复：确保是[1]而不是[]
                     "names": ["gripper_torque"]
                 },
                 "action": {
