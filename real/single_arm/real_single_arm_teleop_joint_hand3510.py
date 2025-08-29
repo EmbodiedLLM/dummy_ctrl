@@ -324,6 +324,8 @@ print("Data collection completed")
 logger.info("Stopping UnifiedCANThread...")
 unified_can_thread.stop()
 unified_can_thread.join(timeout=1.0)
+#%%
+data_collector.finalize_dataset()  # 生成全局stats.json
  #%%
 teach_arm.robot.resting()
 follow_arm.robot.resting()
