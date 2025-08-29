@@ -133,8 +133,10 @@ class LeRobotDataCollector:
         for key in self.current_episode_data:
             self.current_episode_data[key] = []
 
-    def collect_step(self, obs, action, timestamp=time.time(), done=False):
+    def collect_step(self, obs, action, timestamp=None, done=False):
         """Collect one timestep of data"""
+        if timestamp is None:
+            timestamp = time.time()
         if self.start_time is None:
             self.start_episode()
 
