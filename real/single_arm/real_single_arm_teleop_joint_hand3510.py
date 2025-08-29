@@ -196,10 +196,8 @@ t_start_wall = time.monotonic()
 iter_idx = 0
 dt = 1/ctrl_frequency
 # command_latency  = 0.01 # Latency between receiving command to executing on Robot in Sec.
-data_collector.start_episode(task="pick the green cube into the box")
 print("Starting data collection, press right Shift key to stop...")
-
-
+data_collector.start_episode(task="pick the green cube into the box")
 while not stop:
     # calculate timing
     t_cycle_end = t_start_wall + (iter_idx + 1) * dt
@@ -208,8 +206,8 @@ while not stop:
     current_time = time.time()
     
     # 使用时间戳获取匹配的帧
-    camera_head_frame = camera_head.get_frame_by_timestamp(current_time, tolerance=0.4)
-    camera_wrist_frame = camera_wrist.get_frame_by_timestamp(current_time, tolerance=0.4)
+    camera_head_frame = camera_head.get_frame_by_timestamp(current_time, tolerance=dt/2)
+    camera_wrist_frame = camera_wrist.get_frame_by_timestamp(current_time, tolerance=dt/2)
     
     if camera_head_frame is None or camera_wrist_frame is None:
         ## 如果没找到匹配的帧就直接报错
@@ -284,10 +282,14 @@ while not stop:
     teach_hand.control_mit(0, 0, 0, 0, feedback_torque)
 
     # Step 5: Collect data (obs + action)
+    current_time = time.time()
+    # relative_time = time.monotonic() - t_start_wall
+    relative_time = iter_idx * dt
     data_collector.collect_step(
         obs=obs,
         action=action,
-        timestamp=time.time()
+        timestamp=relative_time,
+        clock_time=current_time
     )
 
     # 计算循环实际耗时, 延迟检测和记录

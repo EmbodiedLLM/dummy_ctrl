@@ -1,0 +1,1 @@
+- Python Virtual Environment Path: `/Users/yinzi/dummy_ctrl/real/.venv/bin/python`

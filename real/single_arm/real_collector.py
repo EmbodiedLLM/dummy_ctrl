@@ -75,7 +75,8 @@ class LeRobotDataCollector:
             "next.done": [],
             "index": [],
             "task_index": [],
-            "task": []  # Add task field for PI0 models
+            "task": [],  # Add task field for PI0 models
+            "clock_time": []  # Add clock_time field for original timestamps
         }
 
         self.camera_frames = {
@@ -91,6 +92,7 @@ class LeRobotDataCollector:
         
         self.frame_count = 0
         self.start_time = None
+        self.episode_start_time = None  # Track episode start time for relative timestamps
         
         # High-precision timer
         self.timer_start_time = time.monotonic()
@@ -116,8 +118,10 @@ class LeRobotDataCollector:
             self.set_task(task)
         if start_time is not None:
             self.start_time = start_time
+            self.episode_start_time = start_time
         else:
             self.start_time = time.time()
+            self.episode_start_time = self.start_time
         self.camera_frames = {
             "head": {
                 "frames": [],
@@ -132,13 +136,29 @@ class LeRobotDataCollector:
         # Reset episode buffer
         for key in self.current_episode_data:
             self.current_episode_data[key] = []
+        # Reset episode start time
+        self.episode_start_time = None
 
-    def collect_step(self, obs, action, timestamp=None, done=False):
-        """Collect one timestep of data"""
-        if timestamp is None:
-            timestamp = time.time()
+    def collect_step(self, obs, action, timestamp=None, clock_time=None, done=False):
+        """Collect one timestep of data
+        
+        Args:
+            obs: Observation data
+            action: Action data  
+            timestamp: Relative timestamp (from episode start). If None, will be calculated from clock_time
+            clock_time: Absolute clock time. If None, will use current time.time()
+            done: Whether episode is done
+        """
+        if clock_time is None:
+            clock_time = time.time()
         if self.start_time is None:
             self.start_episode()
+        if self.episode_start_time is None:
+            self.episode_start_time = clock_time
+        
+        # Calculate relative timestamp if not provided
+        if timestamp is None:
+            timestamp = clock_time - self.episode_start_time
 
         if "camera_head" in obs:
             self.camera_frames["head"]["timestamps"].append(timestamp)
@@ -154,7 +174,8 @@ class LeRobotDataCollector:
         }
         self.current_episode_data["observation.state"].append(obs_states_dict)
         self.current_episode_data["action"].append(action)
-        self.current_episode_data["timestamp"].append(timestamp)
+        self.current_episode_data["timestamp"].append(timestamp)  # Use relative timestamp
+        self.current_episode_data["clock_time"].append(clock_time)  # Store original clock time
         self.current_episode_data["next.done"].append(done)
         self.current_episode_data["episode_index"].append(self.episode_count)
         self.current_episode_data["frame_index"].append(self.frame_count)
@@ -475,6 +496,7 @@ class LeRobotDataCollector:
                 "episode_index": {"dtype": "int64", "shape": []},
                 "frame_index": {"dtype": "int64", "shape": []},
                 "timestamp": {"dtype": "float64", "shape": []},
+                "clock_time": {"dtype": "float64", "shape": []},
                 "next.done": {"dtype": "bool", "shape": []},
                 "index": {"dtype": "int64", "shape": []},
                 "task_index": {"dtype": "int64", "shape": []},
