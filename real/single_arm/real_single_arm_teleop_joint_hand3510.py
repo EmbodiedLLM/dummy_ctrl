@@ -232,8 +232,8 @@ while not stop:
     follow_joints = arm_controller.get_follow_joints()
     arm_controller.refresh_follow_hand()
     obs = {
-        "camera_head": camera_head_frame,
-        "camera_wrist": camera_wrist_frame,
+        "cam_head": camera_head_frame,
+        "cam_wrist": camera_wrist_frame,
         "joint_states": follow_joints,
         "gripper_pos_deg": follow_hand.position * RAD2DEG,
         "gripper_torque": follow_hand.torque

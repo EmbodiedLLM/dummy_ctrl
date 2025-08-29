@@ -160,12 +160,12 @@ class LeRobotDataCollector:
         if timestamp is None:
             timestamp = clock_time - self.episode_start_time
 
-        if "camera_head" in obs:
+        if "cam_head" in obs:
             self.camera_frames["head"]["timestamps"].append(timestamp)
-            self.camera_frames["head"]["frames"].append(obs["camera_head"])
-        if "camera_wrist" in obs:
+            self.camera_frames["head"]["frames"].append(obs["cam_head"])
+        if "cam_wrist" in obs:
             self.camera_frames["wrist"]["timestamps"].append(timestamp)
-            self.camera_frames["wrist"]["frames"].append(obs["camera_wrist"])
+            self.camera_frames["wrist"]["frames"].append(obs["cam_wrist"])
 
         obs_states_dict = {
             "joint_states": obs.get("joint_states", []),
@@ -360,6 +360,8 @@ class LeRobotDataCollector:
         
         stats = {}
         stat_keys = ["observation.joint_states", "observation.gripper_pos", "observation.gripper_torque", "action"]
+        
+        # 计算状态和动作数据的统计信息
         for key in stat_keys:
             if key in processed_data and len(processed_data[key]) > 0:
                 try:
@@ -410,6 +412,10 @@ class LeRobotDataCollector:
                     logger.warning(f"Error computing stats for {key}: {e}")
                     continue
 
+        # 计算相机数据的统计信息
+        if self.use_video:
+            self._compute_camera_stats(stats, episode_idx)
+
         episode_stats = {
             "episode_index": episode_idx,
             "stats": stats
@@ -417,6 +423,48 @@ class LeRobotDataCollector:
 
         with open(episode_stats_file, "a") as f:
             f.write(json.dumps(episode_stats) + "\n")
+    
+    def _compute_camera_stats(self, stats, episode_idx):
+        """计算相机数据的统计信息"""
+        import cv2
+        
+        camera_keys = ["observation.images.cam_head", "observation.images.cam_wrist"]
+        camera_mapping = {
+            "observation.images.cam_head": "head",
+            "observation.images.cam_wrist": "wrist"  
+        }
+        
+        for cam_key in camera_keys:
+            cam_name = camera_mapping[cam_key]
+            if cam_name in self.camera_frames and len(self.camera_frames[cam_name]["frames"]) > 0:
+                try:
+                    frames = self.camera_frames[cam_name]["frames"]
+                    
+                    # 将所有帧转换为numpy数组
+                    frames_array = []
+                    for frame in frames:
+                        # OpenCV格式是BGR，转换为RGB
+                        if len(frame.shape) == 3 and frame.shape[2] == 3:
+                            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        else:
+                            rgb_frame = frame
+                        frames_array.append(rgb_frame)
+                    
+                    frames_array = np.array(frames_array, dtype=np.uint8)  # [T, H, W, C]
+                    
+                    # 计算统计信息 (按通道计算)
+                    stats[cam_key] = {
+                        "mean": frames_array.mean(axis=(0,1,2)).tolist(),  # [C] 
+                        "std": frames_array.std(axis=(0,1,2)).tolist(),    # [C]
+                        "min": frames_array.min(axis=(0,1,2)).tolist(),    # [C]
+                        "max": frames_array.max(axis=(0,1,2)).tolist(),    # [C]
+                        "count": len(frames)
+                    }
+                    
+                    logger.info(f"Computed stats for {cam_key}: mean={stats[cam_key]['mean']}")
+                    
+                except Exception as e:
+                    logger.warning(f"Error computing camera stats for {cam_key}: {e}")
     
     def _update_info_json(self):
         """Update info.json with current dataset information"""
