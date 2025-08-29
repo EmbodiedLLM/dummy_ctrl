@@ -1,15 +1,17 @@
 import argparse
 from pathlib import Path
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, create_tag
 
 # python push_to_hub.py \
 #   --data_dir /Users/jack/Desktop/dummy_ctrl/datasets/pick_cube_20demos \
-#   --repo_id JackYuuuu/test
+#   --repo_id JackYuuuu/test \
+#   --tag v1.0
 
 def push_dataset_to_hub(
     data_dir: Path,
     repo_id: str,
-    private: bool = False
+    private: bool = False,
+    tag: str = None
 ):
     """Push dataset to HuggingFace Hub"""
     api = HfApi()
@@ -47,6 +49,15 @@ def push_dataset_to_hub(
     )
     
     print(f"Successfully pushed dataset to {repo_id}")
+    
+    # Create tag if specified
+    if tag:
+        create_tag(
+            repo_id=repo_id,
+            tag=tag,
+            repo_type="dataset"
+        )
+        print(f"Created tag '{tag}' for dataset {repo_id}")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -66,6 +77,11 @@ def main():
         "--private",
         action="store_true",
         help="Make repository private"
+    )
+    parser.add_argument(
+        "--tag",
+        type=str,
+        help="Create a tag for this version (e.g., 'v1.0', '1.0')"
     )
     
     args = parser.parse_args()

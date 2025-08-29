@@ -97,9 +97,10 @@ def get_action_from_parquet(df: pd.DataFrame, frame_index: int) -> List[float]:
         List[float]: 动作数据列表
     """
     try:
-        action = df.iloc[frame_index]['observation.joint_states']
-        gripper = df.iloc[frame_index]['observation.gripper_pos']
-        action = np.concatenate([action, gripper[None]])
+        # action = df.iloc[frame_index]['observation.joint_states']
+        # gripper = df.iloc[frame_index]['observation.gripper_pos']
+        # action = np.concatenate([action, gripper[None]])
+        action = df.iloc[frame_index]['action']
         # 确保数组是可写的
         action = action.copy()
         return action.tolist()

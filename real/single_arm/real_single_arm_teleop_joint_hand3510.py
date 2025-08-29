@@ -18,7 +18,7 @@ import cv2
 logger = fibre.utils.Logger(verbose=True)
 teach_arm_SN = "3950366E3233"
 follow_arm_SN = "396636713233"
-ctrl_frequency = 50 # 50 Hz
+ctrl_frequency = 20 # 20 Hz
 data_frequency = 10 # 10 Hz
 # 夹爪MIT控制参数
 ## 这两个参数等于是位置跟随
@@ -89,6 +89,18 @@ teach_hand_motor_control.set_zero_position(teach_hand_motor)
 logger.info("Setting Follow Arm Hand to Zero")
 follow_arm.robot.hand.set_enable(True)
 follow_arm.robot.hand.set_zero()
+
+#%%
+from datetime import datetime
+date_str = datetime.now().strftime("%Y-%m-%d")
+datetime_str = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+data_collector = LeRobotDataCollector(
+    output_dir=f"/Users/yinzi/dummy_ctrl/data/{date_str}/pick_place_greencube_{datetime_str}",
+    fps=data_frequency, # 10Hz
+    robot_type="dummy_arm_inz",
+    use_video=True,
+    task="pick the green cube into the box"
+)
 #%% 开启相机
 import cv2
 import matplotlib.pyplot as plt
@@ -132,18 +144,6 @@ plt.axis('off')
 plt.show()
 
 logger.info("Cameras initialized successfully")
-#%%
-from datetime import datetime
-date_str = datetime.now().strftime("%Y-%m-%d")
-datetime_str = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-data_collector = LeRobotDataCollector(
-    output_dir=f"/Users/yinzi/dummy_ctrl/data/{date_str}/pick_place_greencube_{datetime_str}",
-    fps=data_frequency, # 10Hz
-    robot_type="dummy_arm_inz",
-    use_video=True,
-    task="pick the green cube into the box"
-)
-#%%
 arm_controller = ArmAngle(teach_arm, follow_arm, joint_offset)
 logger.info("Preparing initial joint states")
 init_teach_joints = arm_controller.get_teach_joints()
@@ -200,15 +200,6 @@ data_collector.start_episode(task="pick the green cube into the box")
 print("Starting data collection, press right Shift key to stop...")
 
 
-# 重置相机线程的状态
-camera_head.reset()
-camera_wrist.reset()
-
-# 等待缓冲区重新填充
-print("Waiting for camera buffers to refill...")
-time.sleep(1.0)  # 等待1秒让相机重新采集帧
-
-
 while not stop:
     # calculate timing
     t_cycle_end = t_start_wall + (iter_idx + 1) * dt
@@ -221,8 +212,8 @@ while not stop:
     camera_wrist_frame = camera_wrist.get_frame_by_timestamp(current_time, tolerance=0.4)
     
     if camera_head_frame is None or camera_wrist_frame is None:
-        # 如果没找到匹配的帧就直接报错
-        raise ValueError("No matching timestamp frame found")
+        ## 如果没找到匹配的帧就直接报错
+        ## raise ValueError("No matching timestamp frame found")
         # 如果没找到匹配的帧，使用最新帧
         head_result = camera_head.get_latest_frame()
         wrist_result = camera_wrist.get_latest_frame()
@@ -308,7 +299,9 @@ while not stop:
     precise_wait(t_cycle_end)
     iter_idx += 1
 
-
+camera_head.stop()
+camera_wrist.stop()
+print("Cameras stopped")
 teach_arm.robot.set_enable(True)
 follow_arm.robot.set_enable(True)
 # teach_arm.robot.resting()
@@ -332,8 +325,3 @@ unified_can_thread.join(timeout=1.0)
  #%%
 teach_arm.robot.resting()
 follow_arm.robot.resting()
-#%% stop camera
-camera_head.stop()
-camera_wrist.stop()
-print("Cameras stopped")
-# %%

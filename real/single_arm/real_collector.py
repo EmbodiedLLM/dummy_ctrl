@@ -216,14 +216,15 @@ class LeRobotDataCollector:
                 # 展开嵌套字典结构
                 processed_data["observation.joint_states"] = [v["joint_states"] for v
     in values]
-                processed_data["observation.gripper_pos"] = [v["gripper_pos_deg"] for
+                processed_data["observation.gripper_pos"] = [np.array([v["gripper_pos_deg"]]) for
     v in values]
-                processed_data["observation.gripper_torque"] = [v["gripper_torque"]
+                processed_data["observation.gripper_torque"] = [np.array([v["gripper_torque"]])
     for v in values]
             elif key == "action":
-                # 确保action格式正确
-                processed_data[key] = [v["joint_states"] + [v["gripper_pos_deg"]] if
-    isinstance(v, dict) else v for v in values]
+                processed_data[key] = [
+                    np.concatenate([v["joint_states"], [v["gripper_pos_deg"]]]).tolist() if isinstance(v, dict) else v 
+                    for v in values
+                ]
             else:
                 processed_data[key] = values
 
@@ -334,25 +335,56 @@ class LeRobotDataCollector:
                 try:
                     # 转换为numpy数组进行统计
                     if key == "action":
-                        # action可能是嵌套列表
-                        arr = np.array([item if isinstance(item, list) else [item] for item in processed_data[key]])
-                    else:
-                        arr = np.array(processed_data[key])
-
-                    if arr.ndim > 1:
+                        # action数据处理 - 避免多余嵌套
+                        data_list = []
+                        for item in processed_data[key]:
+                            if isinstance(item, list):
+                                data_list.append(item)
+                            else:
+                                data_list.append([item])
+                        arr = np.array(data_list)
+                        
+                        # 重新整形数据，去除多余的维度
+                        if arr.ndim == 3 and arr.shape[1] == 1:
+                            arr = arr.reshape(arr.shape[0], arr.shape[2])  # (N, 1, 7) -> (N, 7)
+                        
+                        # 计算统计信息
                         stats[key] = {
                             "mean": arr.mean(axis=0).tolist(),
                             "std": arr.std(axis=0).tolist(),
                             "min": arr.min(axis=0).tolist(),
-                            "max": arr.max(axis=0).tolist()
+                            "max": arr.max(axis=0).tolist(),
+                            "count": [self.frame_count]
                         }
-                    else:
-                        # 1D数据
+                        
+                    elif key in ["observation.gripper_pos", "observation.gripper_torque"]:
+                        # gripper数据处理
+                        data_list = []
+                        for item in processed_data[key]:
+                            if hasattr(item, '__len__') and not isinstance(item, str):
+                                data_list.append(item)
+                            else:
+                                data_list.append([item])
+                        arr = np.array(data_list)
+                        
                         stats[key] = {
-                            "mean": float(arr.mean()),
-                            "std": float(arr.std()),
-                            "min": float(arr.min()),
-                            "max": float(arr.max())
+                            "mean": arr.mean(axis=0).tolist(),
+                            "std": arr.std(axis=0).tolist(), 
+                            "min": arr.min(axis=0).tolist(),
+                            "max": arr.max(axis=0).tolist(),
+                            "count": [self.frame_count]
+                        }
+                        
+                    else:
+                        # joint_states等其他数据
+                        arr = np.array(processed_data[key])
+                        
+                        stats[key] = {
+                            "mean": arr.mean(axis=0).tolist(),
+                            "std": arr.std(axis=0).tolist(),
+                            "min": arr.min(axis=0).tolist(),
+                            "max": arr.max(axis=0).tolist(),
+                            "count": [self.frame_count]
                         }
                 except Exception as e:
                     logger.warning(f"Error computing stats for {key}: {e}")
@@ -416,6 +448,8 @@ class LeRobotDataCollector:
             "total_tasks": 1,
             "total_videos": video_count,
             "splits": {"train": f"0:{self.episode_count}"},
+            "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+            "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
             "features": {
                 # 分离的观测特征
                 "observation.joint_states": {
@@ -425,12 +459,12 @@ class LeRobotDataCollector:
                 },
                 "observation.gripper_pos": {
                     "dtype": "float32",
-                    "shape": [],
+                    "shape": [1],
                     "names": ["gripper_position_deg"]
                 },
                 "observation.gripper_torque": {
                     "dtype": "float32", 
-                    "shape": [],
+                    "shape": [1],
                     "names": ["gripper_torque"]
                 },
                 "action": {
