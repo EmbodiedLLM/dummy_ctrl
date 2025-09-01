@@ -90,6 +90,8 @@ class VideoStream:
         return self
         
     def update(self):
+        if self.url.isdigit():
+            self.url = int(self.url)
         cap = cv2.VideoCapture(self.url)
         
         # Set resolution if specified
@@ -354,9 +356,10 @@ def main():
     parser = argparse.ArgumentParser(description="Policy gRPC Client")
     parser.add_argument("--server", default="localhost:50051", help="Server address")
     parser.add_argument("--serial_number", default="396636713233", help="Serial number of the follower arm")
-    parser.add_argument("--camera_wrist", default="http://192.168.237.100:8080/?action=stream", help="Wrist camera URL")
+    # parser.add_argument("--camera_wrist", default="http://192.168.237.100:8080/?action=stream", help="Wrist camera URL")
+    parser.add_argument("--camera_wrist", default="1", help="Wrist camera URL")
     # parser.add_argument("--camera_head", default="http://192.168.237.157:8080/?action=stream", help="Head camera URL (optional)")
-    parser.add_argument("--camera_head", default="None", help="Head camera URL (optional)")
+    parser.add_argument("--camera_head", default="0", help="Head camera URL (optional)")
     parser.add_argument("--wrist_resolution", default="1280x720", help="Wrist camera resolution (WxH)")
     parser.add_argument("--head_resolution", default="1280x720", help="Head camera resolution (WxH)")
     parser.add_argument("--inference_time_s", type=int, default=300, help="Inference time in seconds")
@@ -364,8 +367,8 @@ def main():
     parser.add_argument("--queue_size", type=int, default=2, help="Queue size")
     parser.add_argument("--warm_up", type=int, default=20, help="Warm-up time")
     parser.add_argument("--task", type=str, default="pick the cube into the box", help="Task description for language-conditioned policies")
-    parser.add_argument("--log_dir", type=str, default="/Users/jack/lab_intern/dummy_ctrl/log/lerobot_dp_traj", help="Directory to save log data")
-    parser.add_argument("--use_wandb", action="store_true", default=True, help="Enable logging to Weights & Biases")
+    parser.add_argument("--log_dir", type=str, default="/Users/yinzi/dummy_ctrl/log/lerobot_dp_traj", help="Directory to save log data")
+    parser.add_argument("--use_wandb", action="store_true", default=False, help="Enable logging to Weights & Biases")
     parser.add_argument("--wandb_project", type=str, default="lerobot_dp_traj", help="WandB project name")
     parser.add_argument("--wandb_entity", type=str, default=None, help="WandB entity/username")
     parser.add_argument("--wandb_api_key", type=str, default=None, help="WandB API key (alternative to using wandb login)")
@@ -484,9 +487,11 @@ def main():
     )
 
     logger_fibre = fibre.utils.Logger(verbose=True)
+    print("Finding Robot Arm...")
     follower_arm = fibre.find_any(serial_number=args.serial_number, logger=logger_fibre)
     follower_arm.robot.resting()
     follower_arm.robot.set_enable(True)
+    follower_arm.robot.hand.set_enable(True)
     follower_arm.robot.move_j(0, -30, 90, 0, 70, 0)
     # follower_arm.robot.move_j(0, 0, 90, 0, 0, 0)
     joint_offset = np.array([0.0,-73.0,180.0,0.0,0.0,0.0])
@@ -544,8 +549,10 @@ def main():
 
         # Read the follower state and access the frames from the cameras
         follow_joints = arm_controller.get_follow_joints()
-        gripper = follower_arm.robot.hand.angle
-        current_state = follow_joints.tolist() + [gripper]
+        gripper_pos_rad = follower_arm.robot.hand.position
+        gripper_pos_deg = np.rad2deg(gripper_pos_rad)
+        current_state = follow_joints.tolist() + [gripper_pos_deg]
+
         
         print("current_state: ", current_state)
 
@@ -584,11 +591,10 @@ def main():
                     prediction[4],  # joint_5
                     prediction[5]   # joint_6
                 )
-                if prediction[6] < -155.0:
-                    angle = -165.0
-                else:
-                    angle = prediction[6]
-                follower_arm.robot.hand.set_angle(angle)
+                hand_position_deg = prediction[6]
+                hand_position_rad = np.deg2rad(hand_position_deg)
+                # follower_arm.robot.hand.set_angle(angle)
+                follower_arm.robot.hand.control_mit(0.8, 0.05, hand_position_rad, 0, 0)
         except Exception as e:
             error_type = "Warm-up" if is_warmup else "Inference"
             logger.error(f"{error_type} Error: {e}")

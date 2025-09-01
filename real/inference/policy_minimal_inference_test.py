@@ -1,10 +1,14 @@
 #%%
 import torch
-from lerobot.common.policies.act.modeling_act import ACTPolicy
+# from lerobot.common.policies.act.modeling_act import ACTPolicy
+# from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 
-PRETRAINED_POLICY_PATH = "/Users/yinzi/Downloads/Dummy_V2_workspace/dummy_ai/dummy_ctrl/checkpoints/train/cube_act_0326/100000/pretrained_model"
+# PRETRAINED_POLICY_PATH = "/Users/yinzi/Downloads/Dummy_V2_workspace/dummy_ai/dummy_ctrl/checkpoints/train/cube_act_0326/100000/pretrained_model"
+PRETRAINED_POLICY_PATH = "inz/dummy_dp_pick_cube_green_0829"
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-policy = ACTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
+# policy = ACTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
+policy = DiffusionPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
 #%%
 policy.to(device)
 policy.eval()
@@ -43,16 +47,22 @@ def get_observation_from_video(video_path, frame_index=0):
     cap.release()
     return frame
 
-video_path = "/Users/yinzi/Downloads/Dummy_V2_workspace/dummy_ai/dummy_ctrl/data/pick_cube_20demos/videos/chunk-000/observation.images.cam_wrist/episode_000021.mp4"
-image = get_observation_from_video(video_path)
-image = torch.from_numpy(image).float().permute(2, 0, 1)  / 255.0
+# video_path = "/Users/yinzi/Downloads/Dummy_V2_workspace/dummy_ai/dummy_ctrl/data/pick_cube_20demos/videos/chunk-000/observation.images.cam_wrist/episode_000021.mp4"
+head_video_path = "/Users/yinzi/dummy_ctrl/data/2025-08-29/pick_place_greencube_2025-08-29_180507/videos/chunk-000/observation.images.cam_head/episode_000000.mp4"
+wrist_video_path = "/Users/yinzi/dummy_ctrl/data/2025-08-29/pick_place_greencube_2025-08-29_180507/videos/chunk-000/observation.images.cam_wrist/episode_000000.mp4"
+head_image = get_observation_from_video(head_video_path)
+wrist_image = get_observation_from_video(wrist_video_path)
 import matplotlib.pyplot as plt
-plt.imshow(image.permute(1, 2, 0).cpu().numpy())
-plt.show()
+plt.subplot(1,2,1)
+plt.imshow(head_image)
+
+plt.subplot(1,2,2)
+plt.imshow(wrist_image)
 #%%
 import torch
 import pandas as pd
-parquet_path = "/Users/yinzi/Downloads/Dummy_V2_workspace/dummy_ai/dummy_ctrl/data/pick_cube_20demos/data/chunk-000/episode_000021.parquet"
+# parquet_path = "/Users/yinzi/Downloads/Dummy_V2_workspace/dummy_ai/dummy_ctrl/data/pick_cube_20demos/data/chunk-000/episode_000021.parquet"
+parquet_path = "/Users/yinzi/dummy_ctrl/data/2025-08-29/pick_place_greencube_2025-08-29_180507/data/chunk-000/episode_000000.parquet"
 # Read state from parquet
 df = pd.read_parquet(parquet_path)
 closest_idx = 0  # Get the first frame
@@ -60,10 +70,12 @@ state = df.iloc[closest_idx]['observation.state']
 # Fix: Make numpy array writable before converting to tensor
 state = state.copy()  # Create writable copy
 state_tensor = torch.from_numpy(state).float()
-
+wrist_image_tensor = torch.from_numpy(wrist_image).float().permute(2, 0, 1)  / 255.0
+head_image_tensor = torch.from_numpy(head_image).float().permute(2, 0, 1)  / 255.0
 # Create observation dict
 observation = {
-    "observation.images.cam_wrist": image.unsqueeze(0).to(device),
+    "observation.images.cam_wrist": wrist_image_tensor.unsqueeze(0).to(device),
+    "observation.images.cam_head": head_image_tensor.unsqueeze(0).to(device),
     "observation.state": state_tensor.unsqueeze(0).to(device)
 }
 #%%

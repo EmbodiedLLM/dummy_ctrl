@@ -13,10 +13,14 @@ from proto import policy_pb2
 from proto import policy_pb2_grpc
 
 # Import the ACT policy model
-from lerobot.common.policies.act.modeling_act import ACTPolicy
-from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy
-from lerobot.common.policies.pi0.modeling_pi0 import PI0Policy
-from lerobot.common.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+# from lerobot.policies.pi0.modeling_pi0 import PI0Policy
+# from lerobot.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+# from lerobot.common.policies.act.modeling_act import ACTPolicy
+# from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy
+# from lerobot.common.policies.pi0.modeling_pi0 import PI0Policy
+# from lerobot.common.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
 # Set PyTorch seed for reproducibility
 # seed = 1000
 # torch.manual_seed(seed)
@@ -78,10 +82,10 @@ class PolicyServicer(policy_pb2_grpc.PolicyServiceServicer):
                 self.policy = ACTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
             elif args.policy == "diffusion":
                 self.policy = DiffusionPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
-            elif args.policy == "pi0":
-                self.policy = PI0Policy.from_pretrained(PRETRAINED_POLICY_PATH)
-            elif args.policy == "pi0fast":
-                self.policy = PI0FASTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
+            # elif args.policy == "pi0":
+                # self.policy = PI0Policy.from_pretrained(PRETRAINED_POLICY_PATH)
+            # elif args.policy == "pi0fast":
+                # self.policy = PI0FASTPolicy.from_pretrained(PRETRAINED_POLICY_PATH)
             self.policy.to(device)
             self.policy.eval()  # Set to evaluation mode
             self.policy.reset()  # Reset policy state
