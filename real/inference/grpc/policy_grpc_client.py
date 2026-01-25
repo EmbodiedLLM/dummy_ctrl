@@ -339,7 +339,9 @@ class KeyboardMonitor:
                     # Check for Enter key (both '\n' and '\r' for compatibility)
                     if key in ['\n', '\r']:
                         self.enabled = not self.enabled
-                        self.follower_arm.robot.set_enable(self.enabled)
+                        # self.follower_arm.robot.set_enable(self.enabled)
+                        if not self.enabled:
+                            self.follower_arm.robot.resting()
                         status = "Enabled" if self.enabled else "Disabled"
                         logger.info(f"Arm {status}")
         finally:

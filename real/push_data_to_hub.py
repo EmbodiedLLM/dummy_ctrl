@@ -8,7 +8,7 @@ from jinja2 import Template
 # python push_to_hub.py \
 #   --data_dir /Users/jack/Desktop/dummy_ctrl/datasets/pick_cube_20demos \
 #   --repo_id JackYuuuu/test \
-#   --tag v1.0
+#   --tag v2.1
 
 README_TEMPLATE = """---
 license: mit
@@ -262,7 +262,8 @@ def main():
     parser.add_argument(
         "--tag",
         type=str,
-        help="Create a tag for this version (e.g., 'v1.0', '1.0')"
+        default="v2.1",
+        help="Create a tag for this version (default: 'v2.1')"
     )
     
     args = parser.parse_args()

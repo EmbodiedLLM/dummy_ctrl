@@ -18,8 +18,9 @@ import cv2
 logger = fibre.utils.Logger(verbose=True)
 teach_arm_SN = "3950366E3233"
 follow_arm_SN = "396636713233"
-ctrl_frequency = 20 # 20 Hz
-data_frequency = 10 # 10 Hz
+frequency = 20 # Hz
+ctrl_frequency = frequency
+data_frequency = frequency
 # 夹爪MIT控制参数
 ## 这两个参数等于是位置跟随
 kp_gripper = 0.8
